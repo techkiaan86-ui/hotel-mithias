@@ -9,6 +9,7 @@ import managerRoutes from './modules/manager/managerRoutes.js';
 import upsellsRoutes from './modules/upsells/upsellsRoutes.js';
 import whatsappRoutes from './modules/whatsapp/whatsappRoutes.js';
 import onboardingRoutes from './modules/onboarding/onboardingRoutes.js';
+import { handleEmailDetect } from './modules/onboarding/onboardingController.js';
 import usersRoutes from './modules/users/userRoutes.js';
 import billingRoutes from './modules/billing/billingRoutes.js';
 import pmsRoutes from './modules/pms/pmsRoutes.js';
@@ -18,6 +19,8 @@ const router = Router();
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'hotelogx-connect-backend', timestamp: new Date().toISOString() });
 });
+
+router.get('/email-detect', handleEmailDetect);
 
 router.use('/auth', authRoutes);
 router.use('/rooms', roomsRoutes);

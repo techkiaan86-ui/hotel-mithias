@@ -418,3 +418,14 @@ export const completeOnboarding = async (req, res, next) => {
   }
 };
 
+export const handleEmailDetect = async (req, res, next) => {
+  try {
+    const input = req.query.email || req.query.domain || '';
+    const { detectEmailProvider } = await import('../../utils/emailDetect.js');
+    const result = await detectEmailProvider(input);
+    return res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+

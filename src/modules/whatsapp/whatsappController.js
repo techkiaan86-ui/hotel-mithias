@@ -92,18 +92,22 @@ export const getThreads = async (req, res, next) => {
   try {
     const threads = await prisma.waThread.findMany({
       include: {
-        messages: {
-          orderBy: { at: 'asc' },
-        },
+        messages: true,
       },
     });
 
     const parsed = threads.map((t) => ({
       ...t,
-      messages: t.messages.map((m) => ({
-        ...m,
-        buttons: JSON.parse(m.buttons || '[]'),
-      })),
+      messages: t.messages.map((m) => {
+        let buttons = [];
+        try {
+          buttons = typeof m.buttons === 'string' ? JSON.parse(m.buttons) : (m.buttons || []);
+        } catch {}
+        return {
+          ...m,
+          buttons,
+        };
+      }),
     }));
 
     return successResponse(res, parsed, 'WhatsApp threads');
