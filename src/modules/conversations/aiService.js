@@ -1,123 +1,233 @@
-  import { prisma } from '../../config/database.js';
+import { prisma } from '../../config/database.js';
 
-  /**
-   * Housekeeping intent keywords map and dictionary
-   */
-  const HOUSEKEEPING_PATTERNS = [
-    { regex: /\b(towel|towels|bath towel|hand towel|face towel)\b/i, item: 'Fresh towels', priority: 'Normal' },
-    { regex: /\b(pillow|pillows|extra pillow|feather pillow)\b/i, item: 'Extra pillows', priority: 'Normal' },
-    { regex: /\b(blanket|blankets|duvet|bedsheet|bed sheet|linen)\b/i, item: 'Extra bedding / blanket', priority: 'Normal' },
-    { regex: /\b(baby cot|cot|crib|baby bed)\b/i, item: 'Baby cot setup', priority: 'High' },
-    { regex: /\b(toiletries|shampoo|conditioner|soap|body wash|shower gel)\b/i, item: 'Toiletries replenishment', priority: 'Normal' },
-    { regex: /\b(dental kit|toothbrush|toothpaste|shaving kit|razor)\b/i, item: 'Dental / vanity kit', priority: 'Normal' },
-    { regex: /\b(slipper|slippers|bathrobe|robe)\b/i, item: 'Bathrobes & slippers', priority: 'Normal' },
-    { regex: /\b(water|water bottle|bottles of water|drinking water)\b/i, item: 'Complimentary water bottles', priority: 'Normal' },
-    { regex: /\b(iron|ironing board|steamer)\b/i, item: 'Iron & ironing board', priority: 'Normal' },
-    { regex: /\b(clean|cleaning|clean my room|housekeeping|make up room|service room)\b/i, item: 'Room cleaning service', priority: 'High' },
-    { regex: /\b(trash|rubbish|garbage|empty bin|bin)\b/i, item: 'Trash clearance', priority: 'Normal' },
-    { regex: /\b(toilet paper|tissue|tissues|napkins)\b/i, item: 'Tissue / toilet roll refill', priority: 'Normal' },
-  ];
+/**
+ * Common stop words for keyword extraction
+ */
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'what', 'when', 'where', 'which', 'who', 'how', 'why',
+  'can', 'could', 'would', 'will', 'you', 'your', 'our', 'are', 'was', 'were',
+  'have', 'has', 'had', 'does', 'did', 'about', 'from', 'this', 'that', 'there',
+  'please', 'tell', 'want', 'need', 'give', 'know', 'some', 'any', 'much', 'many',
+  'hotel', 'room', 'time', 'stay', 'available', 'policy', 'rules'
+]);
 
-  /**
-   * Maintenance intent keywords
-   */
-  const MAINTENANCE_PATTERNS = [
-    { regex: /\b(ac|air condition|air conditioner|heating|hvac|thermostat|cold|hot)\b/i, issue: 'AC / Climate control issue' },
-    { regex: /\b(leak|leaking|tap|faucet|drain|clogged|plumbing|flush|toilet)\b/i, issue: 'Plumbing / leak issue' },
-    { regex: /\b(tv|television|remote|channels|wifi|internet|connection)\b/i, issue: 'TV / Media connectivity issue' },
-    { regex: /\b(light|bulb|lamp|electricity|power|socket|plug)\b/i, issue: 'Electrical / lighting issue' },
-    { regex: /\b(lock|key|keycard|safe|door)\b/i, issue: 'Door lock / in-room safe issue' },
-  ];
+/**
+ * Housekeeping intent keywords map and dictionary
+ */
+const HOUSEKEEPING_PATTERNS = [
+  { regex: /\b(towel|towels|bath towel|hand towel|face towel)\b/i, item: 'Fresh towels', priority: 'Normal' },
+  { regex: /\b(pillow|pillows|extra pillow|feather pillow)\b/i, item: 'Extra pillows', priority: 'Normal' },
+  { regex: /\b(blanket|blankets|duvet|bedsheet|bed sheet|linen)\b/i, item: 'Extra bedding / blanket', priority: 'Normal' },
+  { regex: /\b(baby cot|cot|crib|baby bed)\b/i, item: 'Baby cot setup', priority: 'High' },
+  { regex: /\b(toiletries|shampoo|conditioner|soap|body wash|shower gel)\b/i, item: 'Toiletries replenishment', priority: 'Normal' },
+  { regex: /\b(dental kit|toothbrush|toothpaste|shaving kit|razor)\b/i, item: 'Dental / vanity kit', priority: 'Normal' },
+  { regex: /\b(slipper|slippers|bathrobe|robe)\b/i, item: 'Bathrobes & slippers', priority: 'Normal' },
+  { regex: /\b(water|water bottle|bottles of water|drinking water)\b/i, item: 'Complimentary water bottles', priority: 'Normal' },
+  { regex: /\b(iron|ironing board|steamer)\b/i, item: 'Iron & ironing board', priority: 'Normal' },
+  { regex: /\b(clean|cleaning|clean my room|housekeeping|make up room|service room)\b/i, item: 'Room cleaning service', priority: 'High' },
+  { regex: /\b(trash|rubbish|garbage|empty bin|bin)\b/i, item: 'Trash clearance', priority: 'Normal' },
+  { regex: /\b(toilet paper|tissue|tissues|napkins)\b/i, item: 'Tissue / toilet roll refill', priority: 'Normal' },
+];
 
-  /**
-   * Format current time as HH:MM
-   */
-  function getClockTime(date = new Date()) {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+/**
+ * Maintenance intent keywords
+ */
+const MAINTENANCE_PATTERNS = [
+  { regex: /\b(ac|air condition|air conditioner|heating|hvac|thermostat|cold|hot)\b/i, issue: 'AC / Climate control issue' },
+  { regex: /\b(leak|leaking|tap|faucet|drain|clogged|plumbing|flush|toilet)\b/i, issue: 'Plumbing / leak issue' },
+  { regex: /\b(tv|television|remote|channels|wifi|internet|connection)\b/i, issue: 'TV / Media connectivity issue' },
+  { regex: /\b(light|bulb|lamp|electricity|power|socket|plug)\b/i, issue: 'Electrical / lighting issue' },
+  { regex: /\b(lock|key|keycard|safe|door)\b/i, issue: 'Door lock / in-room safe issue' },
+];
+
+/**
+ * Format current time as HH:MM
+ */
+function getClockTime(date = new Date()) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Calculate due time (minutes added to current time)
+ */
+function getDueTime(minutesToAdd = 20) {
+  const d = new Date(Date.now() + minutesToAdd * 60 * 1000);
+  return getClockTime(d);
+}
+
+/**
+ * Extract room number from message or reservation context
+ */
+function extractRoomNumber(messageText, conversation, guest) {
+  const match = messageText.match(/room\s*#?\s*(\d{2,4})/i) || messageText.match(/\b(\d{3,4})\b/);
+  if (match?.[1]) {
+    return match[1];
+  }
+  if (guest?.reservations?.[0]?.room) {
+    return guest.reservations[0].room;
+  }
+  if (guest?.room) {
+    return guest.room;
+  }
+  return null;
+}
+
+/**
+ * RAG Knowledge Retrieval Layer:
+ * Retrieves relevant KnowledgeChunk records and hotel profile policies for a specific hotelId
+ */
+export async function retrieveRelevantKnowledge(hotelId, queryText) {
+  if (!hotelId || !queryText) {
+    return { chunks: [], docNames: [], contextText: '', hasKnowledge: false };
   }
 
-  /**
-   * Calculate due time (minutes added to current time)
-   */
-  function getDueTime(minutesToAdd = 20) {
-    const d = new Date(Date.now() + minutesToAdd * 60 * 1000);
-    return getClockTime(d);
-  }
+  try {
+    const rawWords = queryText
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 
-  /**
-   * Extract room number from message or reservation context
-   */
-  function extractRoomNumber(messageText, conversation, guest) {
-    const match = messageText.match(/room\s*#?\s*(\d{2,4})/i) || messageText.match(/\b(\d{3,4})\b/);
-    if (match?.[1]) {
-      return match[1];
-    }
-    if (guest?.reservations?.[0]?.room) {
-      return guest.reservations[0].room;
-    }
-    if (guest?.room) {
-      return guest.room;
-    }
-    return null;
-  }
+    // 1. Fetch chunks strictly filtered by hotelId for tenant isolation
+    const chunks = await prisma.knowledgeChunk.findMany({
+      where: { hotelId },
+      include: {
+        knowledgeDoc: {
+          select: { name: true, category: true },
+        },
+      },
+      take: 50,
+    });
 
-  /**
- * Generate intelligent hotel reply using Google Gemini API
+    // 2. Fetch baseline hotel profile (check-in, check-out, amenities, contacts)
+    const hotel = await prisma.hotel.findUnique({
+      where: { id: hotelId },
+      select: {
+        name: true,
+        checkIn: true,
+        checkOut: true,
+        phone: true,
+        email: true,
+        website: true,
+        description: true,
+      },
+    }).catch(() => null);
+
+    const scoredChunks = [];
+    for (const chunk of chunks) {
+      const contentLower = chunk.content.toLowerCase();
+      let score = 0;
+      for (const word of rawWords) {
+        if (contentLower.includes(word)) {
+          score += 2;
+        }
+      }
+      if (score > 0) {
+        scoredChunks.push({
+          ...chunk,
+          score,
+          docName: chunk.knowledgeDoc?.name || 'Hotel Policy',
+        });
+      }
+    }
+
+    scoredChunks.sort((a, b) => b.score - a.score);
+    const topChunks = scoredChunks.slice(0, 3);
+    const docNames = [...new Set(topChunks.map((c) => c.docName))];
+
+    let contextText = '';
+    if (hotel) {
+      contextText += `Hotel Profile Baseline:\n- Hotel: ${hotel.name}\n- Check-in Time: ${hotel.checkIn}\n- Check-out Time: ${hotel.checkOut}\n- Contact Phone: ${hotel.phone}\n- Contact Email: ${hotel.email}\n- Description: ${hotel.description || 'Boutique hotel'}\n\n`;
+    }
+
+    if (topChunks.length > 0) {
+      contextText += `Relevant Stored Hotel Policy Documents:\n` + topChunks.map((c, i) => `[Source ${i + 1}: ${c.docName}]\n${c.content}`).join('\n\n');
+    }
+
+    return {
+      chunks: topChunks,
+      docNames,
+      contextText,
+      hotelProfile: hotel,
+      hasKnowledge: topChunks.length > 0 || Boolean(hotel),
+    };
+  } catch (err) {
+    console.warn('[RAG Retrieval Warning]:', err.message);
+    return { chunks: [], docNames: [], contextText: '', hotelProfile: null, hasKnowledge: false };
+  }
+}
+
+/**
+ * Generate intelligent hotel reply using Google Gemini API with fallback models
  */
 export async function generateWithGemini({ prompt, systemInstruction = '' }) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  try {
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: prompt }],
-        },
-      ],
-    };
+  const models = [
+    process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+    'gemini-2.5-flash',
+  ];
 
-    if (systemInstruction) {
-      payload.systemInstruction = {
-        parts: [{ text: systemInstruction }],
+  for (const model of models) {
+    try {
+      const payload = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }],
+          },
+        ],
       };
-    }
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      if (systemInstruction) {
+        payload.systemInstruction = {
+          parts: [{ text: systemInstruction }],
+        };
       }
-    );
 
-    if (!res.ok) {
-      console.warn(`[Gemini API] Request returned status ${res.status}`);
-      return null;
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!res.ok) {
+        // If unauthorized/forbidden, key is invalid; don't loop endlessly
+        if (res.status === 401 || res.status === 403) {
+          console.warn(`[Gemini API] API Key unauthorized (status ${res.status})`);
+          return null;
+        }
+        continue;
+      }
+
+      const data = await res.json();
+      const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (reply) return reply;
+    } catch (err) {
+      console.warn(`[Gemini API] Error calling model ${model}:`, err.message);
     }
-
-    const data = await res.json();
-    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    return reply || null;
-  } catch (err) {
-    console.warn('[Gemini API] Generation warning:', err.message);
-    return null;
   }
+
+  return null;
 }
 
-  /**
-   * Process inbound guest message, detect intent and trigger automated actions
-   */
-  export async function processGuestMessageAI({
-    messageText,
-    conversationId,
-    hotelId = 'hotel-mercier',
-    channel = 'whatsapp',
-  }) {
-    if (!messageText || typeof messageText !== 'string') {
-      return null;
+/**
+ * Process inbound guest message, detect intent and trigger automated actions with RAG
+ */
+export async function processGuestMessageAI({
+  messageText,
+  conversationId,
+  hotelId = 'hotel-mercier',
+  channel = 'whatsapp',
+}) {
+  if (!messageText || typeof messageText !== 'string') {
+    return null;
   }
 
   // Load conversation details with guest and reservation
@@ -138,7 +248,11 @@ export async function generateWithGemini({ prompt, systemInstruction = '' }) {
   const room = extractRoomNumber(messageText, conversation, guest) || '208';
   const timeStr = getClockTime();
 
-  // 1. Check for Housekeeping Intent
+  // 1. Retrieve RAG Knowledge context strictly for this hotel
+  const rag = await retrieveRelevantKnowledge(effectiveHotelId, messageText);
+  const hotelName = rag.hotelProfile?.name || 'Hotel Mercier';
+
+  // 2. Check for Housekeeping Intent
   for (const pattern of HOUSEKEEPING_PATTERNS) {
     if (pattern.regex.test(messageText)) {
       const itemTitle = `${pattern.item} — Room ${room}`;
@@ -159,7 +273,7 @@ export async function generateWithGemini({ prompt, systemInstruction = '' }) {
           status: 'New',
           createdAt: timeStr,
           due: dueTime,
-          source: 'WhatsApp',
+          source: channel === 'whatsapp' ? 'WhatsApp' : 'Guest Chat',
           conversationId,
           trail: {
             create: [
@@ -208,7 +322,7 @@ export async function generateWithGemini({ prompt, systemInstruction = '' }) {
 
       let aiReplyBody = await generateWithGemini({
         prompt: `A hotel guest (${guestName}, Room ${room}) sent this message: "${messageText}". Write a polite, warm, concise 2-sentence hotel reply letting them know we have dispatched housekeeping with their ${pattern.item.toLowerCase()} right away.`,
-        systemInstruction: `You are the AI Front Desk assistant for a boutique hotel. Be warm, professional, concise, and helpful. Do not use placeholders.`,
+        systemInstruction: `You are the AI Front Desk assistant for ${hotelName}. Be warm, professional, concise, and helpful. Do not use placeholders.`,
       });
 
       if (!aiReplyBody) {
@@ -238,7 +352,7 @@ export async function generateWithGemini({ prompt, systemInstruction = '' }) {
     }
   }
 
-  // 2. Check for Maintenance Intent
+  // 3. Check for Maintenance Intent
   for (const pattern of MAINTENANCE_PATTERNS) {
     if (pattern.regex.test(messageText)) {
       const issueTitle = `${pattern.issue} in Room ${room}`;
@@ -275,7 +389,7 @@ export async function generateWithGemini({ prompt, systemInstruction = '' }) {
 
       let aiReplyBody = await generateWithGemini({
         prompt: `A hotel guest (${guestName}, Room ${room}) reported an issue: "${messageText}". Write a polite, empathetic, concise 2-sentence hotel reply apologizing for the inconvenience and stating that our maintenance team has been notified and a technician is heading to their room.`,
-        systemInstruction: `You are the AI Front Desk assistant for a boutique hotel. Be warm, professional, concise, and helpful. Do not use placeholders.`,
+        systemInstruction: `You are the AI Front Desk assistant for ${hotelName}. Be warm, professional, concise, and helpful. Do not use placeholders.`,
       });
 
       if (!aiReplyBody) {
@@ -304,32 +418,78 @@ export async function generateWithGemini({ prompt, systemInstruction = '' }) {
     }
   }
 
-  // 3. Fallback General AI Acknowledgement with Gemini
-  let fallbackReply = await generateWithGemini({
-    prompt: `A hotel guest (${guestName}, Room ${room}) sent this message: "${messageText}". Write a friendly, professional 1-2 sentence response assisting them or letting them know front desk is at their service.`,
-    systemInstruction: `You are the AI Front Desk assistant for a boutique hotel. Be warm, professional, concise, and helpful. Do not use placeholders.`,
+  // 4. Hotel Policies, FAQs & General Questions with RAG
+  const ragPrompt = `A hotel guest (${guestName}, Room ${room}) asked: "${messageText}".
+${rag.contextText ? `\nVerified Hotel Information & Stored Policies:\n${rag.contextText}\n` : ''}
+Write a polite, accurate, concise 1-3 sentence response directly answering their question based on the verified hotel policies above.
+- If asking about check-in, check-out, breakfast, parking, wifi, cancellation, or pets, state the exact hours/details from the policies.
+- If the exact answer is not in the documents, give a warm front-desk assistance reply and offer to help.`;
+
+  const ragSystem = `You are the AI Front Desk Assistant for ${hotelName}. Be warm, professional, and strictly accurate to the hotel's policies. Do not invent contradictory policies. Do not use placeholders.`;
+
+  let replyText = await generateWithGemini({
+    prompt: ragPrompt,
+    systemInstruction: ragSystem,
   });
 
-  if (!fallbackReply) {
-    fallbackReply = `Thank you for your message, ${guestName.split(' ')[0] || 'Guest'}. Our front office and guest experience team are at your service. Please let us know if you need anything specific for your stay.`;
+  // 5. Contextual Fallback if Gemini API is offline or returns null
+  if (!replyText) {
+    const lower = messageText.toLowerCase();
+    if (lower.includes('check-in') || lower.includes('check in') || lower.includes('arrival')) {
+      const ci = rag.hotelProfile?.checkIn || '15:00';
+      const co = rag.hotelProfile?.checkOut || '11:00';
+      replyText = `Our standard check-in time is from ${ci}, and check-out is until ${co}. If you require an early check-in or late check-out, please let us know and we will be delighted to assist you.`;
+    } else if (lower.includes('check-out') || lower.includes('checkout') || lower.includes('departure')) {
+      const co = rag.hotelProfile?.checkOut || '11:00';
+      replyText = `Check-out time is until ${co}. Late check-out can be arranged upon request subject to availability.`;
+    } else if (lower.includes('breakfast')) {
+      replyText = `Breakfast is served daily in our dining room starting at 07:00. We offer a buffet featuring fresh local Belgian pastries, artisanal cheeses, fruit, and hot beverages.`;
+    } else if (lower.includes('wifi') || lower.includes('wi-fi') || lower.includes('internet')) {
+      replyText = `High-speed complimentary Wi-Fi is available throughout the hotel. You can connect to 'HotelMercier-Guest' with no password required.`;
+    } else if (lower.includes('pet') || lower.includes('dog') || lower.includes('cat')) {
+      replyText = `Small well-behaved pets are welcome at our property upon advance notice. Please inform the front desk so we can prepare pet amenities for your room.`;
+    } else if (rag.chunks.length > 0) {
+      // Synthesize fallback from top chunk content
+      const snippet = rag.chunks[0].content.slice(0, 150).trim();
+      replyText = `Regarding your inquiry: "${snippet}..." Our front desk team is also available 24/7 if you have further questions.`;
+    } else {
+      replyText = `Thank you for your message, ${guestName.split(' ')[0] || 'Guest'}. Our front office team at ${hotelName} is at your service. Please let us know if you need anything specific for your stay.`;
+    }
   }
 
-  const fallbackMsg = await prisma.message.create({
+  // 6. Persist Knowledge Used in Conversation
+  if (rag.docNames.length > 0) {
+    try {
+      const existingKnowledge = JSON.parse(conversation.knowledgeUsed || '[]');
+      const updatedKnowledge = [...new Set([...existingKnowledge, ...rag.docNames])];
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: {
+          knowledgeUsed: JSON.stringify(updatedKnowledge),
+          lastAt: timeStr,
+        },
+      });
+    } catch (_) {}
+  }
+
+  const aiMsg = await prisma.message.create({
     data: {
       id: `m-${Date.now()}`,
       conversationId,
       author: 'ai',
       channel,
-      body: fallbackReply,
+      body: replyText,
       at: timeStr,
-      confidence: 0.92,
+      knowledge: JSON.stringify(rag.docNames),
+      confidence: rag.docNames.length > 0 ? 0.95 : 0.90,
     },
   });
 
   return {
     handled: true,
-    type: 'general',
-    message: fallbackMsg,
-    replyText: fallbackReply,
+    type: rag.docNames.length > 0 ? 'knowledge_rag' : 'general',
+    message: aiMsg,
+    replyText,
+    knowledgeUsed: rag.docNames,
   };
 }

@@ -520,6 +520,166 @@ async function main() {
     });
   }
 
+  // 10. WhatsApp Operational Threads & Messages
+  const operationalThreads = [
+    {
+      id: 'wa-maria',
+      hotelId: 'hotel-mercier',
+      contact: 'Maria Silva',
+      phone: '+32 478 11 22 33',
+      role: 'Housekeeper',
+      department: 'Housekeeping',
+      messages: [
+        {
+          id: 'wm-maria-1',
+          from: 'hotelogx',
+          body: 'Room 201 checked out at 08:12. Departure clean required. Next guest arriving at 16:00.',
+          at: '08:15',
+          buttons: JSON.stringify([{ label: 'Start Cleaning' }, { label: 'Cleaned' }, { label: 'Needs Inspection' }, { label: 'Maintenance Issue' }]),
+          chosen: 'Start Cleaning',
+        },
+        {
+          id: 'wm-maria-2',
+          from: 'hotelogx',
+          body: 'Room 205 stayover: Guest inside, late checkout pending decision.',
+          at: '09:21',
+          buttons: JSON.stringify([{ label: 'Guest Inside' }, { label: 'DND' }, { label: 'Maintenance Issue' }]),
+        },
+      ],
+    },
+    {
+      id: 'wa-ines',
+      hotelId: 'hotel-mercier',
+      contact: 'Inês Duarte',
+      phone: '+32 471 22 33 44',
+      role: 'Housekeeper',
+      department: 'Housekeeping',
+      messages: [
+        {
+          id: 'wm-ines-1',
+          from: 'hotelogx',
+          body: 'Room 208 vacant departure. Baby cot requested for 14:00 arrival.',
+          at: '08:50',
+          buttons: JSON.stringify([{ label: 'Start Cleaning' }, { label: 'Cleaned' }, { label: 'Needs Inspection' }]),
+        },
+        {
+          id: 'wm-ines-2',
+          from: 'hotelogx',
+          body: 'Room 307 shower leak reported. VIP arrival at 14:00.',
+          at: '09:11',
+          buttons: JSON.stringify([{ label: 'Maintenance Issue' }, { label: 'Needs Inspection' }]),
+          chosen: 'Maintenance Issue',
+        },
+      ],
+    },
+    {
+      id: 'wa-kadir',
+      hotelId: 'hotel-mercier',
+      contact: 'Kadir Yılmaz',
+      phone: '+32 465 33 44 55',
+      role: 'Housekeeper',
+      department: 'Housekeeping',
+      messages: [
+        {
+          id: 'wm-kadir-1',
+          from: 'hotelogx',
+          body: 'Room 212 stayover clean. In house guest.',
+          at: '09:02',
+          buttons: JSON.stringify([{ label: 'Start Cleaning' }, { label: 'Cleaned' }, { label: 'DND' }]),
+          chosen: 'Cleaned',
+        },
+        {
+          id: 'wm-kadir-2',
+          from: 'hotelogx',
+          body: 'Room 216 DND active since 08:30.',
+          at: '09:30',
+          buttons: JSON.stringify([{ label: 'Try again now' }, { label: 'Cleaned' }]),
+        },
+      ],
+    },
+    {
+      id: 'wa-alina',
+      hotelId: 'hotel-mercier',
+      contact: 'Alina Popescu',
+      phone: '+32 494 44 55 66',
+      role: 'Housekeeper',
+      department: 'Housekeeping',
+      messages: [
+        {
+          id: 'wm-alina-1',
+          from: 'hotelogx',
+          body: 'Room 118 checked out 09:05. Ready for departure clean.',
+          at: '09:05',
+          buttons: JSON.stringify([{ label: 'Start Cleaning' }, { label: 'Cleaned' }, { label: 'Needs Inspection' }]),
+        },
+        {
+          id: 'wm-alina-2',
+          from: 'hotelogx',
+          body: 'Room 411 minibar audit requested — billing dispute.',
+          at: '09:20',
+          buttons: JSON.stringify([{ label: 'Start Cleaning' }, { label: 'Cleaned' }]),
+        },
+      ],
+    },
+    {
+      id: 'wa-peter',
+      hotelId: 'hotel-mercier',
+      contact: 'Peter Janssens',
+      phone: '+32 494 31 62 18',
+      role: 'Technical Manager',
+      department: 'Maintenance',
+      messages: [
+        {
+          id: 'wm-peter-1',
+          from: 'hotelogx',
+          body: 'Ticket MT-307: Shower leak in Room 307. VIP arrival today at 14:00. High priority.',
+          at: '09:12',
+          buttons: JSON.stringify([{ label: 'Awaiting Parts' }, { label: 'In Progress' }, { label: 'Fixed / Repaired' }]),
+          chosen: 'In Progress',
+        },
+        {
+          id: 'wm-peter-2',
+          from: 'hotelogx',
+          body: 'Ticket MT-302: AC not cooling in Room 302. Guest in room.',
+          at: '09:55',
+          buttons: JSON.stringify([{ label: 'In Progress' }, { label: 'Fixed / Repaired' }]),
+        },
+      ],
+    },
+  ];
+
+  for (const thread of operationalThreads) {
+    const { messages, ...threadData } = thread;
+    await prisma.waThread.upsert({
+      where: { id: threadData.id },
+      update: threadData,
+      create: threadData,
+    });
+
+    for (const msg of messages) {
+      await prisma.waMessage.upsert({
+        where: { id: msg.id },
+        update: {
+          from: msg.from,
+          body: msg.body,
+          at: msg.at,
+          buttons: msg.buttons,
+          chosen: msg.chosen ?? null,
+        },
+        create: {
+          id: msg.id,
+          threadId: threadData.id,
+          hotelId: threadData.hotelId,
+          from: msg.from,
+          body: msg.body,
+          at: msg.at,
+          buttons: msg.buttons,
+          chosen: msg.chosen ?? null,
+        },
+      });
+    }
+  }
+
   console.log('✅ Seeding completed successfully!');
 }
 

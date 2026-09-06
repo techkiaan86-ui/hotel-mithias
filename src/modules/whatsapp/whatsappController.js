@@ -94,6 +94,9 @@ export const getThreads = async (req, res, next) => {
       include: {
         messages: true,
       },
+    }).catch((err) => {
+      console.warn('[WhatsApp Threads Warning]', err.message);
+      return [];
     });
 
     const parsed = threads.map((t) => ({
@@ -314,6 +317,8 @@ export const handleWebhook = async (req, res) => {
     const senderName = contacts?.[0]?.profile?.name || 'Guest';
     const msgText = msg.text?.body || msg.interactive?.button_reply?.title || msg.button?.text || '';
 
+    if (!msgText) return;
+
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -329,6 +334,92 @@ export const handleWebhook = async (req, res) => {
         meta: 'Meta Cloud API',
       },
     }).catch(() => {});
+
+    // 1. Locate or create guest for this WhatsApp contact
+    const hotelId = 'hotel-mercier';
+    let guest = await prisma.guest.findFirst({
+      where: {
+        hotelId,
+        OR: [
+          { id: `g-wa-${fromPhone}` },
+          { name: senderName },
+        ],
+      },
+      include: { reservations: true },
+    });
+
+    if (!guest) {
+      guest = await prisma.guest.create({
+        data: {
+          id: `g-wa-${fromPhone}`,
+          hotelId,
+          name: senderName || `WhatsApp Guest (+${fromPhone})`,
+          country: 'International',
+          language: 'English',
+          room: '208',
+          tags: JSON.stringify(['WhatsApp Contact']),
+        },
+        include: { reservations: true },
+      }).catch(async () => {
+        return await prisma.guest.findFirst({ where: { hotelId } });
+      });
+    }
+
+    if (!guest) return;
+
+    // 2. Locate or create active conversation
+    let conversation = await prisma.conversation.findFirst({
+      where: { guestId: guest.id },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const convId = conversation?.id || `conv-wa-${Date.now()}`;
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: {
+          id: convId,
+          guestId: guest.id,
+          stage: 'in-house',
+          primaryChannel: 'whatsapp',
+          aiStatus: 'ai-handling',
+          sentiment: 'positive',
+          subject: `WhatsApp Chat with ${guest.name}`,
+          summary: `Direct inquiry received via WhatsApp from +${fromPhone}.`,
+          suggestedReply: '',
+          lastAt: timeStr,
+        },
+      }).catch(() => null);
+    }
+
+    if (!conversation) return;
+
+    // 3. Record guest message
+    await prisma.message.create({
+      data: {
+        id: `m-wa-${Date.now()}`,
+        conversationId: conversation.id,
+        author: 'guest',
+        channel: 'whatsapp',
+        body: msgText,
+        at: timeStr,
+      },
+    }).catch(() => {});
+
+    // 4. If AI handling is enabled, process with AI service
+    if (conversation.aiStatus === 'ai-handling') {
+      const { processGuestMessageAI } = await import('../conversations/aiService.js');
+      const aiResult = await processGuestMessageAI({
+        messageText: msgText,
+        conversationId: conversation.id,
+        hotelId,
+        channel: 'whatsapp',
+      });
+
+      // 5. Dispatch AI reply back to the guest via WhatsApp Cloud API
+      if (aiResult?.replyText && fromPhone) {
+        sendMetaWhatsAppMessage(fromPhone, aiResult.replyText).catch(() => {});
+      }
+    }
 
   } catch (err) {
     console.error('[WhatsApp Webhook Error]', err.message);

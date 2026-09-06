@@ -308,24 +308,32 @@ model ActivityItem {
 
 model WaThread {
   id         String      @id
+  hotelId    String      @default("hotel-mercier")
   contact    String
-  role       String
   phone      String
+  role       String
   department String
   messages   WaMessage[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @default(now()) @updatedAt
+
+  @@index([hotelId])
 }
 
 model WaMessage {
-  id       String   @id
-  threadId String
-  from     String
-  body     String   @db.Text
-  at       String
-  buttons  String   @default("[]")
-  chosen   String?
-  thread   WaThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  id        String   @id
+  threadId  String
+  hotelId   String   @default("hotel-mercier")
+  from      String
+  body      String   @db.Text
+  at        String
+  buttons   String   @default("[]")
+  chosen    String?
+  createdAt DateTime @default(now())
+  thread    WaThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
-  @@index([threadId], map: "WaMessage_threadId_fkey")
+  @@index([threadId])
+  @@index([hotelId])
 }
 
 model PmsIntegration {
@@ -440,3 +448,5 @@ model Invoice {
   @@index([hotelId])
   @@index([subscriptionId])
 }
+
+
