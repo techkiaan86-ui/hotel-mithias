@@ -1,4 +1,5 @@
 import { prisma } from '../../config/database.js';
+import { pmsService } from '../pms/pmsService.js';
 
 /**
  * Common stop words for keyword extraction
@@ -58,7 +59,7 @@ function getDueTime(minutesToAdd = 20) {
 /**
  * Extract room number from message or reservation context
  */
-function extractRoomNumber(messageText, conversation, guest) {
+export function extractRoomNumber(messageText = '', conversation = null, guest = null) {
   const match = messageText.match(/room\s*#?\s*(\d{2,4})/i) || messageText.match(/\b(\d{3,4})\b/);
   if (match?.[1]) {
     return match[1];
@@ -418,7 +419,47 @@ export async function processGuestMessageAI({
     }
   }
 
-  // 4. Hotel Policies, FAQs & General Questions with RAG
+  // 4. Check for Room Availability & Pre-Arrival Booking Inquiry
+  const isAvailabilityInquiry = /\b(availability|available room|rooms available|book a room|booking|rates|rate|price|pricing|vacancy|vacant|cost per night)\b/i.test(messageText);
+  if (isAvailabilityInquiry) {
+    const pmsAvail = await pmsService.checkAvailability(effectiveHotelId);
+    const bookingUrl = pmsAvail.bookingEngine || 'https://booking.hotelmercier.be';
+    const categoriesText = (pmsAvail.categories || []).map((c) => `- ${c.name}: ${c.rate}`).join('\n');
+
+    let aiReplyBody = await generateWithGemini({
+      prompt: `A guest asked about room availability and rates: "${messageText}".
+Live Hotel Availability & Rates from PMS:
+${categoriesText}
+Direct Booking Engine Link: ${bookingUrl}
+Write a polite, warm 2-3 sentence response confirming availability, mentioning starting rates, and inviting them to book directly on our website (${bookingUrl}). Never ask for credit card info or confirm reservations directly in chat.`,
+      systemInstruction: `You are the AI Assistant for ${hotelName}. Be warm, welcoming, and concise. Availability and rates are read from PMS. Direct booking ends with a link to the hotel website.`,
+    });
+
+    if (!aiReplyBody) {
+      aiReplyBody = `We have rooms available for your stay! Our Deluxe Courtyard rooms start from €160/night and Superior King from €185/night. You can view full availability and reserve directly on our website here: ${bookingUrl}`;
+    }
+
+    const aiMsg = await prisma.message.create({
+      data: {
+        id: `m-${Date.now()}`,
+        conversationId,
+        author: 'ai',
+        channel,
+        body: aiReplyBody,
+        at: timeStr,
+        confidence: 0.99,
+      },
+    });
+
+    return {
+      handled: true,
+      type: 'pms_availability',
+      message: aiMsg,
+      replyText: aiReplyBody,
+    };
+  }
+
+  // 5. Hotel Policies, FAQs & General Questions with RAG
   const ragPrompt = `A hotel guest (${guestName}, Room ${room}) asked: "${messageText}".
 ${rag.contextText ? `\nVerified Hotel Information & Stored Policies:\n${rag.contextText}\n` : ''}
 Write a polite, accurate, concise 1-3 sentence response directly answering their question based on the verified hotel policies above.

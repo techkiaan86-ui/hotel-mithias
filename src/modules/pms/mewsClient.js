@@ -111,4 +111,58 @@ export class MewsClient {
     });
     return data.Resources || [];
   }
+
+  /**
+   * Fetch Availability from Mews Connector API
+   * Endpoint: POST /api/connector/v1/services/getAvailability
+   */
+  async getAvailability(accessToken, { startUtc, endUtc, serviceId } = {}) {
+    try {
+      const data = await this._post('/services/getAvailability', accessToken, {
+        StartUtc: startUtc || new Date().toISOString(),
+        EndUtc: endUtc || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        ...(serviceId ? { ServiceId: serviceId } : {}),
+      });
+      return data.ResourceCategoryAvailabilities || [];
+    } catch (err) {
+      console.warn('[MewsClient] getAvailability fallback:', err.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch Rates & Pricing from Mews Connector API
+   * Endpoint: POST /api/connector/v1/rates/getAll
+   */
+  async getRates(accessToken, options = {}) {
+    try {
+      const data = await this._post('/rates/getAll', accessToken, {
+        Limitation: { Count: options.limit || 50 },
+        Extent: { Rates: true, RateGroups: true },
+        ...options,
+      });
+      return data.Rates || [];
+    } catch (err) {
+      console.warn('[MewsClient] getRates fallback:', err.message);
+      return [];
+    }
+  }
+
+  /**
+   * Update Room/Space Status in Mews Connector API
+   * Endpoint: POST /api/connector/v1/spaces/update
+   */
+  async updateSpaceStatus(accessToken, { spaceId, status }) {
+    if (!spaceId) return { success: false, reason: 'Missing spaceId' };
+    try {
+      const data = await this._post('/spaces/update', accessToken, {
+        SpaceId: spaceId,
+        State: status, // e.g. 'Clean', 'Dirty', 'Inspected'
+      });
+      return { success: true, data };
+    } catch (err) {
+      console.warn('[MewsClient] updateSpaceStatus fallback:', err.message);
+      return { success: false, error: err.message };
+    }
+  }
 }

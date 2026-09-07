@@ -4,9 +4,6 @@ import { errorResponse, successResponse } from '../../utils/response.js';
 import { sendBrevoInvitationEmail } from '../../utils/mailer.js';
 
 let columnsChecked = false;
-let inMemorySteps = ['profile'];
-let inMemoryTopology = 'separate';
-let inMemoryDone = false;
 
 async function ensureHotelColumns() {
   if (columnsChecked) return;
@@ -32,16 +29,19 @@ async function ensureHotelColumns() {
 export const getOnboardingStatus = async (req, res, next) => {
   try {
     await ensureHotelColumns();
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
 
-    const hotels = await prisma.$queryRawUnsafe('SELECT * FROM Hotel WHERE id = "hotel-mercier" LIMIT 1').catch(() => []);
-    const hotel = Array.isArray(hotels) && hotels.length > 0 ? hotels[0] : null;
+    let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+    if (!hotel && hotelId === 'hotel-mercier') {
+      hotel = await prisma.hotel.findFirst();
+    }
 
-    let stepsDone = inMemorySteps;
+    let stepsDone = ['profile'];
     if (hotel?.onboardingSteps) {
       try {
         stepsDone = JSON.parse(hotel.onboardingSteps);
       } catch {
-        stepsDone = inMemorySteps;
+        stepsDone = ['profile'];
       }
     }
 
@@ -57,28 +57,29 @@ export const getOnboardingStatus = async (req, res, next) => {
     };
 
     const profile = {
-      name: hotel?.name || 'Hotel Mercier',
-      legalName: hotel?.legalName || 'Hotel Mercier BV',
+      name: hotel?.name || 'My Hotel',
+      legalName: hotel?.legalName || `${hotel?.name || 'My Hotel'} BV`,
       stars: Number(hotel?.stars) || 4,
-      rooms: Number(hotel?.roomsCount) || 48,
-      address: hotel?.address || 'Leopoldstraat 42',
-      postcode: hotel?.postcode || '2000',
-      city: hotel?.city || 'Antwerp',
-      country: hotel?.country || 'Belgium',
-      phone: hotel?.phone || '+32 3 227 41 00',
-      email: hotel?.email || 'reception@hotelmercier.be',
-      website: hotel?.website || 'hotelmercier.be',
-      bookingEngine: hotel?.bookingEngine || 'https://booking.hotelmercier.be',
-      whatsappNumber: hotel?.whatsappNumber || '+32 3 227 41 00',
+      rooms: Number(hotel?.roomsCount) || 0,
+      address: hotel?.address || '',
+      postcode: hotel?.postcode || '',
+      city: hotel?.city || '',
+      country: hotel?.country || '',
+      phone: hotel?.phone || '',
+      email: hotel?.email || '',
+      website: hotel?.website || '',
+      bookingEngine: hotel?.bookingEngine || '',
+      whatsappNumber: hotel?.whatsappNumber || '',
       checkIn: hotel?.checkIn || '15:00',
       checkOut: hotel?.checkOut || '11:00',
       languages: ['Dutch', 'French', 'English', 'German'],
-      description: hotel?.description || 'A 48-room townhouse hotel in the fashion district, five minutes from Antwerp Central.',
+      description: hotel?.description || '',
     };
 
     return successResponse(res, {
-      waTopology: hotel?.waTopology || inMemoryTopology,
-      complete: hotel?.onboardingDone !== undefined ? Boolean(hotel.onboardingDone) : inMemoryDone,
+      hotelId,
+      waTopology: hotel?.waTopology || 'separate',
+      complete: Boolean(hotel?.onboardingDone),
       done: doneMap,
       hotelProfile: profile,
     }, 'Onboarding status fetched');
@@ -90,28 +91,31 @@ export const getOnboardingStatus = async (req, res, next) => {
 export const getHotelProfile = async (req, res, next) => {
   try {
     await ensureHotelColumns();
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
 
-    const hotels = await prisma.$queryRawUnsafe('SELECT * FROM Hotel WHERE id = "hotel-mercier" LIMIT 1').catch(() => []);
-    const hotel = Array.isArray(hotels) && hotels.length > 0 ? hotels[0] : null;
+    let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+    if (!hotel && hotelId === 'hotel-mercier') {
+      hotel = await prisma.hotel.findFirst();
+    }
 
     const profile = {
-      name: hotel?.name || 'Hotel Mercier',
-      legalName: hotel?.legalName || 'Hotel Mercier BV',
+      name: hotel?.name || 'My Hotel',
+      legalName: hotel?.legalName || `${hotel?.name || 'My Hotel'} BV`,
       stars: Number(hotel?.stars) || 4,
-      rooms: Number(hotel?.roomsCount) || 48,
-      address: hotel?.address || 'Leopoldstraat 42',
-      postcode: hotel?.postcode || '2000',
-      city: hotel?.city || 'Antwerp',
-      country: hotel?.country || 'Belgium',
-      phone: hotel?.phone || '+32 3 227 41 00',
-      email: hotel?.email || 'reception@hotelmercier.be',
-      website: hotel?.website || 'hotelmercier.be',
-      bookingEngine: hotel?.bookingEngine || 'https://booking.hotelmercier.be',
-      whatsappNumber: hotel?.whatsappNumber || '+32 3 227 41 00',
+      rooms: Number(hotel?.roomsCount) || 0,
+      address: hotel?.address || '',
+      postcode: hotel?.postcode || '',
+      city: hotel?.city || '',
+      country: hotel?.country || '',
+      phone: hotel?.phone || '',
+      email: hotel?.email || '',
+      website: hotel?.website || '',
+      bookingEngine: hotel?.bookingEngine || '',
+      whatsappNumber: hotel?.whatsappNumber || '',
       checkIn: hotel?.checkIn || '15:00',
       checkOut: hotel?.checkOut || '11:00',
       languages: ['Dutch', 'French', 'English', 'German'],
-      description: hotel?.description || 'A 48-room townhouse hotel in the fashion district, five minutes from Antwerp Central.',
+      description: hotel?.description || '',
     };
 
     return successResponse(res, profile, 'Hotel profile fetched');
@@ -123,84 +127,82 @@ export const getHotelProfile = async (req, res, next) => {
 export const saveHotelProfile = async (req, res, next) => {
   try {
     await ensureHotelColumns();
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
 
     const data = req.body;
     if (!data) {
       return errorResponse(res, 'Profile data required', 400);
     }
 
-    const hotels = await prisma.$queryRawUnsafe('SELECT * FROM Hotel WHERE id = "hotel-mercier" LIMIT 1').catch(() => []);
-    const hotel = Array.isArray(hotels) && hotels.length > 0 ? hotels[0] : null;
-
-    if (!inMemorySteps.includes('profile')) {
-      inMemorySteps.push('profile');
+    let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+    if (!hotel && hotelId === 'hotel-mercier') {
+      hotel = await prisma.hotel.findFirst();
     }
 
-    try {
-      if (!hotel) {
-        await prisma.$executeRawUnsafe(
-          `INSERT INTO Hotel (
-            id, name, legalName, stars, roomsCount, address, postcode, city, country,
-            timezone, currency, phone, email, website, bookingEngine, whatsappNumber,
-            checkIn, checkOut, vatNumber, description, createdAt, updatedAt
-          ) VALUES (
-            "hotel-mercier", ?, ?, ?, ?, ?, ?, ?, ?,
-            "Europe/Brussels", "€", ?, ?, ?, "https://booking.hotelmercier.be", ?,
-            ?, ?, "BE 0842.119.402", ?, NOW(), NOW()
-          )`,
-          data.name || 'Hotel Mercier',
-          data.legalName || 'Hotel Mercier BV',
-          Number(data.stars) || 4,
-          Number(data.rooms || data.roomsCount) || 48,
-          data.address || 'Leopoldstraat 42',
-          data.postcode || '2000',
-          data.city || 'Antwerp',
-          data.country || 'Belgium',
-          data.phone || '+32 3 227 41 00',
-          data.email || 'reception@hotelmercier.be',
-          data.website || 'hotelmercier.be',
-          data.whatsappNumber || '+32 3 227 41 00',
-          data.checkIn || '15:00',
-          data.checkOut || '11:00',
-          data.description || ''
-        );
-      } else {
-        await prisma.$executeRawUnsafe(
-          `UPDATE Hotel SET 
-            name = ?, legalName = ?, stars = ?, roomsCount = ?, 
-            address = ?, postcode = ?, city = ?, country = ?, 
-            phone = ?, email = ?, website = ?, checkIn = ?, checkOut = ?, 
-            description = ? 
-          WHERE id = "hotel-mercier"`,
-          data.name ?? hotel.name,
-          data.legalName ?? hotel.legalName,
-          Number(data.stars) || hotel.stars || 4,
-          Number(data.rooms || data.roomsCount) || hotel.roomsCount || 48,
-          data.address ?? hotel.address,
-          data.postcode ?? hotel.postcode,
-          data.city ?? hotel.city,
-          data.country ?? hotel.country,
-          data.phone ?? hotel.phone,
-          data.email ?? hotel.email,
-          data.website ?? hotel.website,
-          data.checkIn ?? hotel.checkIn ?? '15:00',
-          data.checkOut ?? hotel.checkOut ?? '11:00',
-          data.description ?? hotel.description ?? ''
-        );
-      }
+    const targetHotelId = hotel?.id || hotelId;
 
-      // Safe update for onboardingSteps if column exists
-      await prisma.$executeRawUnsafe(
-        'UPDATE Hotel SET onboardingSteps = ? WHERE id = "hotel-mercier"',
-        JSON.stringify(inMemorySteps)
-      ).catch(() => {});
-    } catch (dbErr) {
-      console.warn('Hotel profile DB update warning (continuing safely):', dbErr.message);
+    let stepsDone = ['profile'];
+    if (hotel?.onboardingSteps) {
+      try {
+        stepsDone = JSON.parse(hotel.onboardingSteps);
+      } catch {
+        stepsDone = ['profile'];
+      }
+    }
+    if (!stepsDone.includes('profile')) {
+      stepsDone.push('profile');
+    }
+
+    if (hotel) {
+      await prisma.hotel.update({
+        where: { id: targetHotelId },
+        data: {
+          name: data.name ?? hotel.name,
+          legalName: data.legalName ?? hotel.legalName,
+          stars: Number(data.stars) || hotel.stars || 4,
+          roomsCount: Number(data.rooms || data.roomsCount) || hotel.roomsCount || 0,
+          address: data.address ?? hotel.address,
+          postcode: data.postcode ?? hotel.postcode,
+          city: data.city ?? hotel.city,
+          country: data.country ?? hotel.country,
+          phone: data.phone ?? hotel.phone,
+          email: data.email ?? hotel.email,
+          website: data.website ?? hotel.website,
+          checkIn: data.checkIn ?? hotel.checkIn ?? '15:00',
+          checkOut: data.checkOut ?? hotel.checkOut ?? '11:00',
+          description: data.description ?? hotel.description ?? '',
+          onboardingSteps: JSON.stringify(stepsDone),
+        },
+      });
+    } else {
+      await prisma.hotel.create({
+        data: {
+          id: targetHotelId,
+          name: data.name || 'My Hotel',
+          legalName: data.legalName || `${data.name || 'My Hotel'} BV`,
+          stars: Number(data.stars) || 4,
+          roomsCount: Number(data.rooms || data.roomsCount) || 0,
+          address: data.address || '',
+          postcode: data.postcode || '',
+          city: data.city || '',
+          country: data.country || '',
+          phone: data.phone || '',
+          email: data.email || '',
+          website: data.website || '',
+          bookingEngine: data.bookingEngine || '',
+          whatsappNumber: data.whatsappNumber || '',
+          checkIn: data.checkIn || '15:00',
+          checkOut: data.checkOut || '11:00',
+          vatNumber: data.vatNumber || '',
+          description: data.description || '',
+          onboardingSteps: JSON.stringify(stepsDone),
+        },
+      });
     }
 
     return successResponse(res, {
       profile: data,
-      onboardingSteps: inMemorySteps,
+      onboardingSteps: stepsDone,
       done: true,
     }, 'Hotel profile saved successfully');
   } catch (error) {
@@ -211,22 +213,17 @@ export const saveHotelProfile = async (req, res, next) => {
 export const saveTopology = async (req, res, next) => {
   try {
     await ensureHotelColumns();
-
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
     const { topology } = req.body;
+
     if (!topology) {
       return errorResponse(res, 'Topology choice is required', 400);
     }
 
-    inMemoryTopology = topology;
-
-    try {
-      await prisma.$executeRawUnsafe(
-        'UPDATE Hotel SET waTopology = ? WHERE id = "hotel-mercier"',
-        topology
-      );
-    } catch (dbErr) {
-      console.warn('saveTopology DB update warning (continuing safely):', dbErr.message);
-    }
+    await prisma.hotel.update({
+      where: { id: hotelId },
+      data: { waTopology: topology },
+    }).catch(() => {});
 
     return successResponse(res, { waTopology: topology }, 'WhatsApp topology saved');
   } catch (error) {
@@ -237,30 +234,43 @@ export const saveTopology = async (req, res, next) => {
 export const saveOnboardingStep = async (req, res, next) => {
   try {
     await ensureHotelColumns();
-
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
     const { stepKey, data } = req.body;
+
     if (!stepKey) {
       return errorResponse(res, 'Step key is required', 400);
     }
 
-    if (!inMemorySteps.includes(stepKey)) {
-      inMemorySteps.push(stepKey);
+    let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+    if (!hotel && hotelId === 'hotel-mercier') {
+      hotel = await prisma.hotel.findFirst();
     }
 
-    try {
-      if (stepKey === 'email' && data?.address) {
-        await prisma.$executeRawUnsafe(
-          'UPDATE Hotel SET email = ? WHERE id = "hotel-mercier"',
-          data.address
-        ).catch(() => {});
+    let stepsDone = ['profile'];
+    if (hotel?.onboardingSteps) {
+      try {
+        stepsDone = JSON.parse(hotel.onboardingSteps);
+      } catch {
+        stepsDone = ['profile'];
       }
+    }
+    if (!stepsDone.includes(stepKey)) {
+      stepsDone.push(stepKey);
+    }
 
-      await prisma.$executeRawUnsafe(
-        'UPDATE Hotel SET onboardingSteps = ? WHERE id = "hotel-mercier"',
-        JSON.stringify(inMemorySteps)
-      ).catch(() => {});
-    } catch (dbErr) {
-      console.warn('saveOnboardingStep DB update warning (continuing safely):', dbErr.message);
+    const updateData = {
+      onboardingSteps: JSON.stringify(stepsDone),
+    };
+
+    if (stepKey === 'email' && data?.address) {
+      updateData.email = data.address;
+    }
+
+    if (hotel) {
+      await prisma.hotel.update({
+        where: { id: hotel.id },
+        data: updateData,
+      }).catch(() => {});
     }
 
     // Log activity if an email mailbox is connected
@@ -269,16 +279,14 @@ export const saveOnboardingStep = async (req, res, next) => {
         await prisma.activityItem.create({
           data: {
             id: `act-${Date.now()}`,
-            hotelId: req.user?.hotelId || 'hotel-mercier',
+            hotelId,
             at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
             kind: 'room',
-            text: `Guest mailbox connected: ${data?.address || 'reception@hotelmercier.be'}`,
+            text: `Guest mailbox connected: ${data?.address || hotel?.email || 'reception'}`,
             meta: 'Setup Wizard',
           },
         });
-      } catch {
-        // Continue safely
-      }
+      } catch {}
     }
 
     // Log activity if internal staff WhatsApp is connected
@@ -287,16 +295,14 @@ export const saveOnboardingStep = async (req, res, next) => {
         await prisma.activityItem.create({
           data: {
             id: `act-${Date.now()}`,
-            hotelId: req.user?.hotelId || 'hotel-mercier',
+            hotelId,
             at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
             kind: 'room',
-            text: `Internal Staff WhatsApp connected: ${data?.phone || '+32 3 227 41 09'}`,
+            text: `Internal Staff WhatsApp connected: ${data?.phone || hotel?.phone || ''}`,
             meta: 'Setup Wizard',
           },
         });
-      } catch {
-        // Continue safely
-      }
+      } catch {}
     }
 
     // Handle Step 7: Invite Users (User Upsert + Brevo Transactional Email Dispatch)
@@ -319,19 +325,19 @@ export const saveOnboardingStep = async (req, res, next) => {
 
           const userTitle = roleTitleMap[inviteRole] || 'Staff Member';
           const isWhatsappRole = inviteRole === 'housekeeping' || inviteRole === 'maintenance';
-
-          // Safe default bcrypt password hash for immediate direct workspace access
           const defaultHash = bcrypt.hashSync('demo-access', 10);
 
-          // 1. Physically Upsert User Record into MySQL Database
+          // 1. Physically Upsert User Record into MySQL Database scoped to hotelId
           await prisma.user.upsert({
             where: { email: inviteEmail.toLowerCase() },
             update: {
+              hotelId,
               role: inviteRole,
               title: userTitle,
               whatsapp: isWhatsappRole,
             },
             create: {
+              hotelId,
               name: formattedName,
               email: inviteEmail.toLowerCase(),
               role: inviteRole,
@@ -343,13 +349,13 @@ export const saveOnboardingStep = async (req, res, next) => {
             },
           });
 
-          // 2. Dispatch Branded Invitation Email via Brevo API
+          // 2. Dispatch Invitation Email
           await sendBrevoInvitationEmail({
             toEmail: inviteEmail.toLowerCase(),
             toName: formattedName,
             role: inviteRole,
             title: userTitle,
-            hotelName: 'Hotel Mercier',
+            hotelName: hotel?.name || 'Hotelogx Connect',
             loginUrl: 'http://localhost:5173/login',
             temporaryPassword: 'demo-access',
           });
@@ -358,7 +364,7 @@ export const saveOnboardingStep = async (req, res, next) => {
           await prisma.activityItem.create({
             data: {
               id: `act-${Date.now()}`,
-              hotelId: req.user?.hotelId || 'hotel-mercier',
+              hotelId,
               at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
               kind: 'task',
               text: `Invited team member: ${inviteEmail} (${userTitle})`,
@@ -373,7 +379,7 @@ export const saveOnboardingStep = async (req, res, next) => {
 
     return successResponse(res, {
       stepKey,
-      onboardingSteps: inMemorySteps,
+      onboardingSteps: stepsDone,
       email: data?.email || data?.address,
       phone: data?.phone,
       role: data?.role,
@@ -386,31 +392,32 @@ export const saveOnboardingStep = async (req, res, next) => {
 export const completeOnboarding = async (req, res, next) => {
   try {
     await ensureHotelColumns();
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
 
-    inMemoryDone = true;
+    let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+    if (!hotel && hotelId === 'hotel-mercier') {
+      hotel = await prisma.hotel.findFirst();
+    }
 
-    try {
-      await prisma.$executeRawUnsafe(
-        'UPDATE Hotel SET onboardingDone = 1 WHERE id = "hotel-mercier"'
-      );
-    } catch (dbErr) {
-      console.warn('completeOnboarding DB update warning (continuing safely):', dbErr.message);
+    if (hotel) {
+      await prisma.hotel.update({
+        where: { id: hotel.id },
+        data: { onboardingDone: true },
+      });
     }
 
     try {
       await prisma.activityItem.create({
         data: {
           id: `act-${Date.now()}`,
-          hotelId: req.user?.hotelId || 'hotel-mercier',
+          hotelId,
           at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
           kind: 'room',
-          text: 'Hotel Mercier onboarding completed and live!',
+          text: `${hotel?.name || 'Hotel'} onboarding completed and live!`,
           meta: 'Setup Wizard',
         },
       });
-    } catch {
-      // Continue safely
-    }
+    } catch {}
 
     return successResponse(res, { complete: true }, 'Onboarding completed');
   } catch (error) {

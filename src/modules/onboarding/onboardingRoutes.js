@@ -8,15 +8,16 @@ import {
   completeOnboarding,
   handleEmailDetect,
 } from './onboardingController.js';
+import { authenticate } from '../../middlewares/auth.js';
 
 const router = Router();
 
-router.get('/status', getOnboardingStatus);
-router.get('/profile', getHotelProfile);
+router.get('/status', authenticate, getOnboardingStatus);
+router.get('/profile', authenticate, getHotelProfile);
 router.get('/email-detect', handleEmailDetect);
-router.post('/profile', saveHotelProfile);
-router.post('/topology', saveTopology);
-router.post('/step', saveOnboardingStep);
-router.post('/complete', completeOnboarding);
+router.post('/profile', authenticate, saveHotelProfile);
+router.post('/topology', authenticate, saveTopology);
+router.post('/step', authenticate, saveOnboardingStep);
+router.post('/complete', authenticate, completeOnboarding);
 
 export default router;

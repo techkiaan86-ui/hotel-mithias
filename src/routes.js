@@ -13,6 +13,8 @@ import { handleEmailDetect } from './modules/onboarding/onboardingController.js'
 import usersRoutes from './modules/users/userRoutes.js';
 import billingRoutes from './modules/billing/billingRoutes.js';
 import pmsRoutes from './modules/pms/pmsRoutes.js';
+import realtimeRoutes from './modules/realtime/realtimeRoutes.js';
+import emailRoutes from './modules/email/emailRoutes.js';
 
 const router = Router();
 
@@ -35,5 +37,7 @@ router.use('/knowledge', knowledgeRoutes);
 router.use('/users', usersRoutes);
 router.use('/billing', billingRoutes);
 router.use('/pms', pmsRoutes);
+router.use('/realtime', realtimeRoutes);
+router.use('/email', emailRoutes);
 
 export default router;
