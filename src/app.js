@@ -6,10 +6,16 @@ import { errorHandler } from './middlewares/errorHandler.js';
 
 const app = express();
 
+// Allow all origins dynamically (Localhost, Netlify, Vercel, Custom Domains, Mobile, etc.)
 app.use(
   cors({
-    origin: [config.frontendUrl, 'http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: (origin, callback) => {
+      // Allows any origin that makes the request
+      callback(null, true);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   }),
 );
 
