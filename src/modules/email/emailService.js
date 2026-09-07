@@ -112,10 +112,10 @@ export const emailService = {
    * Process inbound guest email, upsert guest, attach to conversation, and broadcast live via SSE.
    */
   async processInboundEmail(payload) {
-    const rawFrom = payload.from || payload.sender || payload.From || '';
-    const rawTo = payload.to || payload.recipient || payload.To || '';
+    const rawFrom = payload.from || payload.sender || payload.From || payload.fromEmail || '';
+    const rawTo = payload.to || payload.recipient || payload.To || payload.toEmail || '';
     const subject = payload.subject || payload.Subject || 'Guest Inquiry';
-    const textBody = payload.text || payload.body || payload.html || payload.message || '';
+    const textBody = payload.text || payload.body || payload.html || payload.message || payload.bodyText || '';
     const hotelId = payload.hotelId || 'hotel-mercier';
 
     // Parse sender name & email: e.g. "Lucas Moreau <lucas@example.com>" or "lucas@example.com"

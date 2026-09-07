@@ -28,7 +28,8 @@ const MODE_MAP = {
 
 export const getBriefing = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId;
+    if (!hotelId) return errorResponse(res, 'Unauthorized', 401);
 
     const [
       hotel,
@@ -48,7 +49,7 @@ export const getBriefing = async (req, res, next) => {
       prisma.activityItem.findMany({ where: { hotelId }, take: 10, orderBy: { id: 'desc' } }),
     ]);
 
-    const totalRooms = rooms.length || 48;
+    const totalRooms = rooms.length || 0;
     const occupiedRooms = rooms.filter((r) => r.guestStatus !== 'Vacant').length;
     const cleanRooms = rooms.filter((r) => r.status === 'Clean' || r.status === 'Inspected').length;
     const dirtyRooms = rooms.filter((r) => r.status === 'Dirty').length;
@@ -67,11 +68,11 @@ export const getBriefing = async (req, res, next) => {
       .reduce((acc, curr) => acc + curr.value, 0);
 
     const briefing = {
-      hotelName: hotel?.name || 'Hotel Mercier',
+      hotelName: hotel?.name || 'Hotel',
       occupancy: {
         total: totalRooms,
         occupied: occupiedRooms,
-        rate: Math.round((occupiedRooms / totalRooms) * 100),
+        rate: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0,
         clean: cleanRooms,
         dirty: dirtyRooms,
         vipArrivals,
@@ -94,7 +95,8 @@ export const getBriefing = async (req, res, next) => {
 
 export const getActivityFeed = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId;
+    if (!hotelId) return errorResponse(res, 'Unauthorized', 401);
     const activities = await prisma.activityItem.findMany({
       where: { hotelId },
       take: 20,
@@ -108,7 +110,8 @@ export const getActivityFeed = async (req, res, next) => {
 
 export const getAiRules = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId;
+    if (!hotelId) return errorResponse(res, 'Unauthorized', 401);
 
     // Fetch hotel global aiMode
     const hotel = await prisma.hotel.findUnique({
@@ -235,7 +238,8 @@ export const updateAiRules = async (req, res, next) => {
 
 export const getKnowledgeDocs = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId;
+    if (!hotelId) return errorResponse(res, 'Unauthorized', 401);
     const docs = await prisma.knowledgeDoc.findMany({
       where: { hotelId },
       orderBy: { updatedAt: 'desc' },

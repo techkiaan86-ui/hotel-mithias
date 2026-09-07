@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { optionalAuth } from '../../middlewares/auth.js';
+import { authenticate } from '../../middlewares/auth.js';
 import {
   getConversations,
   getConversationById,
@@ -11,7 +11,7 @@ import {
 } from './conversationsController.js';
 
 const router = Router();
-router.use(optionalAuth);
+router.use(authenticate);
 
 router.get('/', getConversations);
 router.get('/:id', getConversationById);

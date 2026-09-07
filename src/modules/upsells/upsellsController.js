@@ -3,7 +3,10 @@ import { errorResponse, successResponse } from '../../utils/response.js';
 
 export const getUpsells = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId;
+    if (!hotelId) {
+      return successResponse(res, [], 'Upsells pipeline');
+    }
     const { status } = req.query;
     const where = { hotelId };
     if (status) where.status = status;
@@ -20,7 +23,10 @@ export const getUpsells = async (req, res, next) => {
 
 export const updateUpsellStatus = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId;
+    if (!hotelId) {
+      return errorResponse(res, 'Unauthorized', 401);
+    }
     const { id } = req.params;
     const { status } = req.body;
 

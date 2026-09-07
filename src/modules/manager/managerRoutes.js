@@ -19,10 +19,10 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
-router.get('/briefing', optionalAuth, getBriefing);
-router.get('/activity', optionalAuth, getActivityFeed);
-router.get('/rules', optionalAuth, getAiRules);
+router.get('/briefing', authenticate, getBriefing);
+router.get('/activity', authenticate, getActivityFeed);
+router.get('/rules', authenticate, getAiRules);
 router.put('/rules', authenticate, updateAiRules);
-router.get('/knowledge', optionalAuth, getKnowledgeDocs);
+router.get('/knowledge', authenticate, getKnowledgeDocs);
 
 export default router;
