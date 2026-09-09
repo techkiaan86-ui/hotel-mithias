@@ -93,3 +93,67 @@ export const mewsWebhookController = async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 };
+
+/**
+ * Controller returning live synchronized room inventory
+ * Endpoint: GET /api/pms/rooms
+ */
+export const getPmsRoomsController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const rooms = await pmsService.getRooms(hotelId);
+    return successResponse(res, rooms, 'PMS rooms retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+/**
+ * Controller returning synchronized active reservations and guest dossiers
+ * Endpoint: GET /api/pms/reservations
+ */
+export const getPmsReservationsController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const reservations = await pmsService.getReservations(hotelId);
+    return successResponse(res, reservations, 'PMS reservations retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+/**
+ * Controller updating room state in database and Mews
+ * Endpoint: PUT /api/pms/rooms/:number/status or PATCH /api/pms/rooms/:number/status
+ */
+export const updatePmsRoomStatusController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const { number } = req.params;
+    const { status, cleaner, note } = req.body;
+
+    if (!status) {
+      return errorResponse(res, 'status is required', 400);
+    }
+
+    const updated = await pmsService.updateRoomStateInPms(hotelId, number, status, cleaner, note);
+    return successResponse(res, updated, 'Room status updated successfully in PMS');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+/**
+ * Controller returning PMS upsell products catalog
+ * Endpoint: GET /api/pms/services
+ */
+export const getPmsServicesController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const services = await pmsService.getServices(hotelId);
+    return successResponse(res, services, 'PMS services retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+

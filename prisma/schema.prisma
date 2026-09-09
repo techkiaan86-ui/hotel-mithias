@@ -350,32 +350,43 @@ model PmsIntegration {
 }
 
 model EmailIntegration {
-  id          String   @id @default(uuid())
-  hotelId     String   @unique
-  email       String
-  provider    String   @default("credentials")
-  imapHost    String?
-  imapPort    Int?
-  smtpHost    String?
-  smtpPort    Int?
-  status      String   @default("connected")
-  lastError   String?  @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  id           String    @id @default(uuid())
+  hotelId      String    @unique
+  email        String
+  provider     String    @default("credentials")
+  imapHost     String?
+  imapPort     Int?
+  smtpHost     String?
+  smtpPort     Int?
+  accessToken  String?   @db.Text
+  refreshToken String?   @db.Text
+  tokenExpiry  DateTime?
+  scope        String?   @db.Text
+  historyId    String?
+  lastSyncAt   DateTime?
+  status       String    @default("connected")
+  lastError    String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt
 }
 
 model WhatsAppIntegration {
-  id          String   @id @default(uuid())
-  hotelId     String
-  targetType  String
-  phoneNumber String
-  wabaId      String?
-  status      String   @default("connected")
-  lastError   String?  @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  id                 String   @id @default(uuid())
+  hotelId            String
+  targetType         String
+  phoneNumber        String
+  displayPhoneNumber String?
+  phoneNumberId      String?
+  wabaId             String?
+  accessToken        String?  @db.Text
+  status             String   @default("connected")
+  lastError          String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
 
   @@unique([hotelId, targetType])
+  @@index([phoneNumberId])
+  @@index([hotelId])
 }
 
 model AiConfig {

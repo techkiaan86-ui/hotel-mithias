@@ -3,6 +3,7 @@ import { errorResponse, successResponse } from '../../utils/response.js';
 import { pmsService } from '../pms/pmsService.js';
 import { realtimeService } from '../../services/realtimeService.js';
 import { extractRoomNumber, processGuestMessageAI } from '../conversations/aiService.js';
+import { exchangeMetaCodeForToken } from './whatsappOAuth.js';
 
 /**
  * Helper: Sanitize phone numbers to pure E.164 digits without +, -, or spaces
@@ -15,19 +16,50 @@ export const sanitizePhoneNumber = (phone) => {
 /**
  * Helper: Send Outbound WhatsApp Message via Meta Cloud Graph API
  */
-export const sendMetaWhatsAppMessage = async (toPhone, text, buttons = []) => {
+export const sendMetaWhatsAppMessage = async (toPhone, text, buttons = [], hotelId = null) => {
   const cleanPhone = sanitizePhoneNumber(toPhone);
   if (!cleanPhone) {
     console.warn('[WhatsApp] No valid recipient phone number provided for dispatch');
     return { success: false, reason: 'Invalid phone number' };
   }
 
-  const token = process.env.META_ACCESS_TOKEN;
-  const phoneId = process.env.META_PHONE_NUMBER_ID;
+  let token = null;
+  let phoneId = null;
 
-  // Graceful Fallback if live credentials are not set in environment
-  if (!token || !phoneId) {
-    console.log(`[WhatsApp Simulator] Outbound message to +${cleanPhone}: "${text}"`);
+  // 1. Resolve tenant-specific Meta WhatsApp credentials from database
+  if (hotelId) {
+    try {
+      const integration = await prisma.whatsAppIntegration.findFirst({
+        where: { hotelId, status: 'connected' },
+      });
+      if (integration) {
+        token = integration.accessToken || null;
+        phoneId = integration.phoneNumberId || null;
+      }
+    } catch (dbErr) {
+      console.warn('[WhatsApp] Database lookup error for hotel credentials:', dbErr.message);
+    }
+  }
+
+  // 2. Fallback to app-level environment tokens if not explicitly set in tenant integration
+  if (!token) {
+    token = process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN;
+  }
+  if (!phoneId) {
+    phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_NUMBER_ID;
+  }
+
+  // 3. Graceful Simulator Fallback if credentials are not configured or simulated
+  if (
+    !token ||
+    !phoneId ||
+    phoneId.startsWith('pn_') ||
+    phoneId.startsWith('phone_') ||
+    phoneId.includes('test') ||
+    phoneId.includes('mock') ||
+    phoneId.includes('meta_phone_id')
+  ) {
+    console.log(`[WhatsApp Simulator] Outbound message to +${cleanPhone} (hotel: ${hotelId || 'default'}): "${text}"`);
     return { success: true, simulated: true };
   }
 
@@ -73,6 +105,7 @@ export const sendMetaWhatsAppMessage = async (toPhone, text, buttons = []) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(3000),
     });
 
     const data = await response.json().catch(() => ({}));
@@ -93,7 +126,9 @@ export const sendMetaWhatsAppMessage = async (toPhone, text, buttons = []) => {
  */
 export const getThreads = async (req, res, next) => {
   try {
+    const hotelId = req.user?.hotelId || req.query?.hotelId;
     const threads = await prisma.waThread.findMany({
+      where: hotelId ? { hotelId } : undefined,
       include: {
         messages: true,
       },
@@ -127,7 +162,10 @@ export const getThreads = async (req, res, next) => {
  */
 export const handleAction = async (req, res, next) => {
   try {
-    const hotelId = req.user?.hotelId || req.body?.hotelId || 'hotel-mercier';
+    const hotelId = req.user?.hotelId || req.body?.hotelId;
+    if (!hotelId) {
+      return errorResponse(res, 'hotelId is required', 400);
+    }
     const { threadId, messageId, label, staffName, room, actionType, phone } = req.body;
 
     const now = new Date();
@@ -265,7 +303,7 @@ export const handleAction = async (req, res, next) => {
 
     // If phone number exists, dispatch live Meta WhatsApp message safely
     if (phone) {
-      sendMetaWhatsAppMessage(phone, `Action confirmed: ${label || 'Task completed'}`).catch(() => {});
+      sendMetaWhatsAppMessage(phone, `Action confirmed: ${label || 'Task completed'}`, [], hotelId).catch(() => {});
     }
 
     return successResponse(res, { success: true, at: timeStr }, 'WhatsApp action processed');
@@ -283,7 +321,7 @@ export const verifyWebhook = (req, res) => {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    const expectedToken = process.env.META_WEBHOOK_VERIFY_TOKEN || 'hotelogx_secret_token';
+    const expectedToken = process.env.VERIFY_TOKEN || process.env.META_WEBHOOK_VERIFY_TOKEN || 'hotelogxcom2606';
 
     if (mode === 'subscribe' && token === expectedToken) {
       console.log('[WhatsApp Webhook] Verification successful');
@@ -306,7 +344,7 @@ export const handleWebhook = async (req, res) => {
     let fromPhone = '';
     let senderName = 'Guest';
     let msgText = '';
-    let hotelId = body.hotelId || 'hotel-mercier';
+    let hotelId = null;
     let isMetaWebhook = false;
 
     if (body.object === 'whatsapp_business_account') {
@@ -315,6 +353,9 @@ export const handleWebhook = async (req, res) => {
       const change = entry?.changes?.[0]?.value;
       const messages = change?.messages;
       const contacts = change?.contacts;
+      const metaPhoneNumberId = change?.metadata?.phone_number_id;
+      const metaDisplayPhone = change?.metadata?.display_phone_number;
+      const metaWabaId = entry?.id;
 
       if (!messages || messages.length === 0) {
         return res.sendStatus(200);
@@ -324,8 +365,46 @@ export const handleWebhook = async (req, res) => {
       fromPhone = msg.from;
       senderName = contacts?.[0]?.profile?.name || 'Guest';
       msgText = msg.text?.body || msg.interactive?.button_reply?.title || msg.button?.text || '';
+
+      // Multi-tenant resolution by Meta Identifiers
+      let integration = null;
+      if (metaPhoneNumberId || metaDisplayPhone || metaWabaId) {
+        integration = await prisma.whatsAppIntegration.findFirst({
+          where: {
+            OR: [
+              ...(metaPhoneNumberId ? [{ phoneNumberId: metaPhoneNumberId }] : []),
+              ...(metaDisplayPhone ? [{ phoneNumber: sanitizePhoneNumber(metaDisplayPhone) }, { displayPhoneNumber: metaDisplayPhone }] : []),
+              ...(metaWabaId ? [{ wabaId: metaWabaId }] : []),
+            ],
+          },
+        }).catch(() => null);
+      }
+
+      if (integration?.hotelId) {
+        hotelId = integration.hotelId;
+      } else if (metaDisplayPhone) {
+        const cleanMetaPhone = sanitizePhoneNumber(metaDisplayPhone);
+        const matchedHotel = await prisma.hotel.findFirst({
+          where: { whatsappNumber: { contains: cleanMetaPhone } },
+        }).catch(() => null);
+        hotelId = matchedHotel?.id;
+      }
+
+      if (!hotelId) {
+        console.warn(`[WhatsApp Webhook] Unmapped Meta identifier (phone_number_id: "${metaPhoneNumberId}", display_phone: "${metaDisplayPhone}", waba: "${metaWabaId}"). Refusing to route to default tenant.`);
+        return res.sendStatus(200); // Acknowledge Meta safely to prevent retry loops without cross-tenant pollution
+      }
     } else {
-      // Direct / Postman / Simulator payload
+      // Direct / Simulator payload
+      hotelId = body.hotelId;
+      if (!hotelId) {
+        return errorResponse(res, 'hotelId is required for simulator/direct dispatch', 400);
+      }
+      const hotelExists = await prisma.hotel.findUnique({ where: { id: hotelId } });
+      if (!hotelExists) {
+        return errorResponse(res, `Hotel tenant "${hotelId}" not found`, 404);
+      }
+
       fromPhone = body.fromPhone || body.phone || body.from || '32491123456';
       senderName = body.senderName || body.name || body.guestName || 'WhatsApp Guest';
       msgText = body.message || body.text || body.msg || '';
@@ -340,13 +419,13 @@ export const handleWebhook = async (req, res) => {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-    console.log(`[WhatsApp Inbound] Message from ${senderName} (+${cleanPhone}): "${msgText}"`);
+    console.log(`[WhatsApp Inbound] Message for hotel "${hotelId}" from ${senderName} (+${cleanPhone}): "${msgText}"`);
 
     // 1. Dynamic Room Detection
     const detectedRoom = body.room || extractRoomNumber(msgText);
 
-    // 2. Locate or create guest for this WhatsApp contact
-    const guestId = `g-wa-${cleanPhone}`;
+    // 2. Tenant-scoped Guest lookup/creation (Prevents cross-tenant collision)
+    const guestId = `g-wa-${hotelId}-${cleanPhone}`;
     let guest = await prisma.guest.findUnique({
       where: { id: guestId },
       include: { reservations: true },
@@ -375,7 +454,7 @@ export const handleWebhook = async (req, res) => {
       });
     }
 
-    // 3. Dynamically link or create PMS Reservation for Guest
+    // 3. Dynamically link or create PMS Reservation for Guest scoped to hotelId
     let reservation = guest.reservations?.[0] || null;
     const roomNum = detectedRoom || guest.room;
 
@@ -385,7 +464,7 @@ export const handleWebhook = async (req, res) => {
           where: { guestId: guest.id, number: { startsWith: 'ENQ-' } },
         }).catch(() => {});
 
-        const resNumber = `RES-${roomNum}`;
+        const resNumber = `RES-${hotelId}-${roomNum}`;
         reservation = await prisma.reservation.upsert({
           where: { number: resNumber },
           create: {
@@ -407,7 +486,7 @@ export const handleWebhook = async (req, res) => {
           },
         });
       } else {
-        const resNumber = `ENQ-${guest.id.slice(-4).toUpperCase()}`;
+        const resNumber = `ENQ-${hotelId}-${guest.id.slice(-4).toUpperCase()}`;
         reservation = await prisma.reservation.upsert({
           where: { number: resNumber },
           create: {
@@ -437,7 +516,7 @@ export const handleWebhook = async (req, res) => {
     });
 
     const convStage = roomNum ? 'In House' : 'Pre-arrival';
-    const convId = conversation?.id || `conv-wa-${Date.now()}`;
+    const convId = conversation?.id || `conv-wa-${hotelId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     if (!conversation) {
       conversation = await prisma.conversation.create({
@@ -469,7 +548,7 @@ export const handleWebhook = async (req, res) => {
     }
 
     // 5. Append message to conversation
-    const msgId = `m-wa-${Date.now()}`;
+    const msgId = `m-wa-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const messageRecord = await prisma.message.create({
       data: {
         id: msgId,
@@ -481,7 +560,7 @@ export const handleWebhook = async (req, res) => {
       },
     });
 
-    // 6. Trigger Universal AI Knowledge & Action Engine
+    // 6. Trigger Universal AI Knowledge & Action Engine strictly for this hotel
     let aiResult = null;
     try {
       aiResult = await processGuestMessageAI({
@@ -531,9 +610,9 @@ export const handleWebhook = async (req, res) => {
       },
     }).catch(() => {});
 
-    // 8. Outbound Dispatch to Guest (if autonomous or simulator)
+    // 8. Outbound Dispatch to Guest (uses hotelId's specific WhatsApp credentials)
     if (aiResult?.replyText && cleanPhone) {
-      sendMetaWhatsAppMessage(cleanPhone, aiResult.replyText).catch(() => {});
+      sendMetaWhatsAppMessage(cleanPhone, aiResult.replyText, [], hotelId).catch(() => {});
     }
 
     // 9. Construct normalized Conversation object for realtime UI rendering
@@ -633,14 +712,54 @@ export const handleWebhook = async (req, res) => {
  */
 export const sendTestMessage = async (req, res, next) => {
   try {
+    const hotelId = req.user?.hotelId || req.body?.hotelId;
     const { to, message, buttons } = req.body;
     if (!to || !message) {
       return errorResponse(res, 'Recipient phone (to) and message text are required', 400);
     }
 
-    const result = await sendMetaWhatsAppMessage(to, message, buttons);
+    const result = await sendMetaWhatsAppMessage(to, message, buttons, hotelId);
     return successResponse(res, result, 'WhatsApp message dispatched');
   } catch (error) {
     next(error);
   }
 };
+
+/**
+ * Endpoint: POST /api/whatsapp/embedded-signup (Meta Embedded Signup Exchange)
+ */
+export const handleEmbeddedSignupExchange = async (req, res, next) => {
+  try {
+    const hotelId = req.user?.hotelId || req.body?.hotelId;
+    if (!hotelId) {
+      return errorResponse(res, 'hotelId is required', 400);
+    }
+
+    const { code, wabaId, phoneNumberId, displayPhoneNumber, targetType } = req.body;
+
+    const integration = await exchangeMetaCodeForToken({
+      code,
+      wabaId,
+      phoneNumberId,
+      displayPhoneNumber,
+      hotelId,
+      targetType: targetType || 'guest',
+    });
+
+    return successResponse(res, {
+      success: true,
+      integration: {
+        id: integration.id,
+        hotelId: integration.hotelId,
+        targetType: integration.targetType,
+        displayPhoneNumber: integration.displayPhoneNumber,
+        phoneNumberId: integration.phoneNumberId,
+        wabaId: integration.wabaId,
+        status: integration.status,
+      },
+    }, 'Meta WhatsApp Business integration connected successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+

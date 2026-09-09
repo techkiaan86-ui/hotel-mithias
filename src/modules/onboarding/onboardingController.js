@@ -4,6 +4,7 @@ import { errorResponse, successResponse } from '../../utils/response.js';
 import { sendBrevoInvitationEmail } from '../../utils/mailer.js';
 
 let columnsChecked = false;
+let waColumnsChecked = false;
 
 async function ensureHotelColumns() {
   if (columnsChecked) return;
@@ -26,13 +27,36 @@ async function ensureHotelColumns() {
   }
 }
 
+export async function ensureWhatsAppColumns() {
+  if (waColumnsChecked) return;
+  try {
+    const columns = await prisma.$queryRawUnsafe('SHOW COLUMNS FROM WhatsAppIntegration').catch(() => []);
+    const colNames = Array.isArray(columns) ? columns.map((c) => c.Field) : [];
+
+    if (colNames.length > 0) {
+      if (!colNames.includes('displayPhoneNumber')) {
+        await prisma.$executeRawUnsafe("ALTER TABLE WhatsAppIntegration ADD COLUMN displayPhoneNumber VARCHAR(191) NULL").catch(() => {});
+      }
+      if (!colNames.includes('phoneNumberId')) {
+        await prisma.$executeRawUnsafe("ALTER TABLE WhatsAppIntegration ADD COLUMN phoneNumberId VARCHAR(191) NULL").catch(() => {});
+      }
+      if (!colNames.includes('accessToken')) {
+        await prisma.$executeRawUnsafe("ALTER TABLE WhatsAppIntegration ADD COLUMN accessToken TEXT NULL").catch(() => {});
+      }
+    }
+    waColumnsChecked = true;
+  } catch (err) {
+    // Graceful fallback
+  }
+}
+
 export const getOnboardingStatus = async (req, res, next) => {
   try {
     await ensureHotelColumns();
     const hotelId = req.user?.hotelId || 'hotel-mercier';
 
     let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
-    if (!hotel && hotelId === 'hotel-mercier') {
+    if (!hotel && !req.user?.hotelId && hotelId === 'hotel-mercier') {
       hotel = await prisma.hotel.findFirst();
     }
 
@@ -135,7 +159,7 @@ export const saveHotelProfile = async (req, res, next) => {
     }
 
     let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
-    if (!hotel && hotelId === 'hotel-mercier') {
+    if (!hotel && !req.user?.hotelId && hotelId === 'hotel-mercier') {
       hotel = await prisma.hotel.findFirst();
     }
 
@@ -266,11 +290,60 @@ export const saveOnboardingStep = async (req, res, next) => {
       updateData.email = data.address;
     }
 
+    if (stepKey === 'wa-guest' && (data?.phone || data?.displayPhoneNumber)) {
+      updateData.whatsappNumber = data.phone || data.displayPhoneNumber;
+    }
+
     if (hotel) {
       await prisma.hotel.update({
         where: { id: hotel.id },
         data: updateData,
       }).catch(() => {});
+    }
+
+    // Ensure WhatsAppIntegration table columns are ready
+    if (stepKey === 'wa-guest' || stepKey === 'wa-internal') {
+      await ensureWhatsAppColumns();
+      const targetType = stepKey === 'wa-guest' ? 'guest' : 'internal';
+      const rawPhone = data?.phone || data?.displayPhoneNumber || (targetType === 'guest' ? hotel?.whatsappNumber : hotel?.phone) || '';
+      const cleanPhone = String(rawPhone).replace(/\D/g, '');
+      const phoneNumberId = data?.phoneNumberId || `phone_${cleanPhone || Date.now()}`;
+      const wabaId = data?.wabaId || `waba_${hotelId}_${targetType}`;
+      const accessToken = data?.accessToken || null;
+
+      if (cleanPhone || phoneNumberId) {
+        try {
+          await prisma.whatsAppIntegration.upsert({
+            where: {
+              hotelId_targetType: {
+                hotelId,
+                targetType,
+              },
+            },
+            update: {
+              phoneNumber: cleanPhone,
+              displayPhoneNumber: rawPhone,
+              phoneNumberId,
+              wabaId,
+              ...(accessToken ? { accessToken } : {}),
+              status: 'connected',
+              lastError: null,
+            },
+            create: {
+              hotelId,
+              targetType,
+              phoneNumber: cleanPhone,
+              displayPhoneNumber: rawPhone,
+              phoneNumberId,
+              wabaId,
+              accessToken,
+              status: 'connected',
+            },
+          });
+        } catch (waErr) {
+          console.warn('[Onboarding WhatsAppIntegration Upsert Warning]:', waErr.message);
+        }
+      }
     }
 
     // Log activity if an email mailbox is connected
@@ -283,6 +356,22 @@ export const saveOnboardingStep = async (req, res, next) => {
             at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
             kind: 'room',
             text: `Guest mailbox connected: ${data?.address || hotel?.email || 'reception'}`,
+            meta: 'Setup Wizard',
+          },
+        });
+      } catch {}
+    }
+
+    // Log activity if guest WhatsApp is connected
+    if (stepKey === 'wa-guest') {
+      try {
+        await prisma.activityItem.create({
+          data: {
+            id: `act-${Date.now()}`,
+            hotelId,
+            at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+            kind: 'room',
+            text: `Guest WhatsApp connected: ${data?.phone || hotel?.whatsappNumber || ''}`,
             meta: 'Setup Wizard',
           },
         });

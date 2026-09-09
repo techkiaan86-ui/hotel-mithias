@@ -1,7 +1,158 @@
 import { emailService } from './emailService.js';
+import { gmailClient } from './gmailClient.js';
 import { verifyImapConnection } from '../../utils/imapVerifier.js';
 import { prisma } from '../../config/database.js';
 import { errorResponse, successResponse } from '../../utils/response.js';
+import { encryptToken, verifyOAuthState } from '../../utils/tokenCrypto.js';
+
+function getFrontendBaseUrl(req) {
+  const allowedFrontends = (process.env.FRONTEND_URL || 'http://localhost:3000,http://localhost:5173,https://hotel-pms-mithiias.netlify.app')
+    .split(',')
+    .map((u) => u.trim());
+  const origin = req.headers.origin || req.headers.referer;
+  if (origin) {
+    try {
+      const parsedOrigin = new URL(origin).origin;
+      if (allowedFrontends.includes(parsedOrigin)) {
+        return parsedOrigin;
+      }
+    } catch (_) {}
+  }
+  return allowedFrontends[0] || 'http://localhost:3000';
+}
+
+/**
+ * Controller to initiate real Google OAuth 2.0 flow
+ * Endpoint: GET /api/email/oauth/google
+ */
+export const initiateGoogleOAuthController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || req.query.hotelId || req.headers['x-hotel-id'] || 'hotel-mercier';
+    const redirectBack = req.query.redirectBack || '/onboarding';
+
+    const authUrl = gmailClient.getGoogleOAuthUrl(hotelId, redirectBack);
+
+    if (req.query.redirect === 'true' || req.query.mode === 'redirect') {
+      return res.redirect(authUrl);
+    }
+
+    return successResponse(res, { url: authUrl, hotelId }, 'Google OAuth URL generated');
+  } catch (err) {
+    return errorResponse(res, err.message, 500);
+  }
+};
+
+/**
+ * Controller to handle Google OAuth callback, exchange authorization code, and persist tokens
+ * Endpoint: GET /api/email/oauth/google/callback
+ */
+export const googleOAuthCallbackController = async (req, res) => {
+  const { code, state, error, error_description } = req.query;
+  const frontendUrl = getFrontendBaseUrl(req);
+
+  // If user denied access or Google reported an error
+  if (error) {
+    const errorMsg = error_description || error || 'Access denied by user';
+    return res.redirect(`${frontendUrl}/onboarding?oauth_status=error&message=${encodeURIComponent(errorMsg)}`);
+  }
+
+  if (!code || !state) {
+    return res.redirect(`${frontendUrl}/onboarding?oauth_status=error&message=${encodeURIComponent('Missing authorization code or state parameter')}`);
+  }
+
+  // Cryptographically verify signed state token
+  const stateCheck = verifyOAuthState(state);
+  if (!stateCheck.valid || !stateCheck.payload?.hotelId) {
+    return res.redirect(`${frontendUrl}/onboarding?oauth_status=error&message=${encodeURIComponent(stateCheck.error || 'Invalid or expired OAuth state')}`);
+  }
+
+  const { hotelId, redirectBack = '/onboarding' } = stateCheck.payload;
+
+  try {
+    // 1. Exchange authorization code for tokens
+    const tokens = await gmailClient.exchangeCodeForTokens(code);
+
+    // 2. Fetch authenticated Gmail email address
+    const profile = await gmailClient.getAuthenticatedGmailAddress(tokens.accessToken);
+    const emailAddress = profile.email;
+
+    // 3. Encrypt tokens before storing
+    const encryptedAccessToken = encryptToken(tokens.accessToken);
+    const encryptedRefreshToken = tokens.refreshToken ? encryptToken(tokens.refreshToken) : null;
+    const expiryDate = new Date(Date.now() + tokens.expiresIn * 1000);
+
+    // 4. Update / Upsert EmailIntegration record scoped strictly to hotelId
+    await prisma.emailIntegration.upsert({
+      where: { hotelId },
+      create: {
+        hotelId,
+        email: emailAddress,
+        provider: 'google',
+        accessToken: encryptedAccessToken,
+        refreshToken: encryptedRefreshToken,
+        tokenExpiry: expiryDate,
+        scope: tokens.scope,
+        historyId: profile.historyId ? String(profile.historyId) : null,
+        status: 'connected',
+      },
+      update: {
+        email: emailAddress,
+        provider: 'google',
+        accessToken: encryptedAccessToken,
+        ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
+        tokenExpiry: expiryDate,
+        scope: tokens.scope,
+        historyId: profile.historyId ? String(profile.historyId) : null,
+        status: 'connected',
+        lastError: null,
+      },
+    });
+
+    // 5. Update Hotel table email & onboarding step
+    let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+    if (!hotel && hotelId === 'hotel-mercier') {
+      hotel = await prisma.hotel.findFirst();
+    }
+    if (hotel) {
+      let stepsDone = ['profile'];
+      if (hotel.onboardingSteps) {
+        try {
+          stepsDone = JSON.parse(hotel.onboardingSteps);
+        } catch {
+          stepsDone = ['profile'];
+        }
+      }
+      if (!stepsDone.includes('email')) {
+        stepsDone.push('email');
+      }
+      await prisma.hotel.update({
+        where: { id: hotel.id },
+        data: {
+          email: emailAddress,
+          onboardingSteps: JSON.stringify(stepsDone),
+        },
+      });
+    }
+
+    // 6. Log Activity Feed
+    await prisma.activityItem.create({
+      data: {
+        id: `act-${Date.now()}`,
+        hotelId,
+        at: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+        kind: 'room',
+        text: `Guest mailbox connected: ${emailAddress}`,
+        meta: 'Setup Wizard',
+      },
+    }).catch(() => {});
+
+    const targetUrl = redirectBack.startsWith('/') ? redirectBack : `/${redirectBack}`;
+    return res.redirect(`${frontendUrl}${targetUrl}?oauth_status=success&email=${encodeURIComponent(emailAddress)}&provider=google`);
+  } catch (err) {
+    console.error('[Google OAuth Callback Error]:', err.message);
+    return res.redirect(`${frontendUrl}/onboarding?oauth_status=error&message=${encodeURIComponent(err.message)}`);
+  }
+};
 
 /**
  * Controller to test live IMAP / SMTP socket connection and greeting
@@ -131,7 +282,7 @@ export const inboundEmailController = async (req, res) => {
 export const sendEmailController = async (req, res) => {
   try {
     const hotelId = req.user?.hotelId || req.body?.hotelId || 'hotel-mercier';
-    const { conversationId, toEmail, subject, text, author } = req.body;
+    const { conversationId, toEmail, subject, text, author, threadId } = req.body;
     const result = await emailService.sendGuestEmail({
       hotelId,
       conversationId,
@@ -139,6 +290,7 @@ export const sendEmailController = async (req, res) => {
       subject,
       text,
       author,
+      threadId,
     });
     return successResponse(res, result, 'Email dispatched successfully');
   } catch (error) {
@@ -146,3 +298,16 @@ export const sendEmailController = async (req, res) => {
   }
 };
 
+/**
+ * Controller to trigger Gmail inbox synchronization
+ * Endpoint: POST /api/email/sync
+ */
+export const syncGmailController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || req.headers['x-hotel-id'] || req.body?.hotelId || 'hotel-mercier';
+    const result = await emailService.syncHotelGmailInbox(hotelId, req.body?.maxResults || 10);
+    return successResponse(res, result, 'Gmail inbox synced successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};

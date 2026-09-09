@@ -5,6 +5,10 @@ import {
   syncPmsController,
   checkAvailabilityController,
   mewsWebhookController,
+  getPmsRoomsController,
+  getPmsReservationsController,
+  updatePmsRoomStatusController,
+  getPmsServicesController,
 } from './pmsController.js';
 import { authenticate } from '../../middlewares/auth.js';
 
@@ -29,12 +33,21 @@ const resolveHotelContext = (req, res, next) => {
 
 // Authenticated/Context PMS management endpoints
 router.post('/connect', resolveHotelContext, connectPmsController);
+router.post('/verify', resolveHotelContext, connectPmsController);
 router.get('/status', resolveHotelContext, getPmsStatusController);
 router.post('/sync', resolveHotelContext, syncPmsController);
 router.get('/availability', checkAvailabilityController);
+
+// Live room, reservation, and services endpoints
+router.get('/rooms', resolveHotelContext, getPmsRoomsController);
+router.get('/reservations', resolveHotelContext, getPmsReservationsController);
+router.patch('/rooms/:number/status', resolveHotelContext, updatePmsRoomStatusController);
+router.put('/rooms/:number/status', resolveHotelContext, updatePmsRoomStatusController);
+router.get('/services', resolveHotelContext, getPmsServicesController);
 
 // Public Mews Webhook Receiver (validated via payload/headers inside controller)
 router.post('/webhook', mewsWebhookController);
 router.post('/webhook/mews', mewsWebhookController);
 
 export default router;
+

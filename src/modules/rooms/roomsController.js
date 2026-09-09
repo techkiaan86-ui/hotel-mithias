@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { errorResponse, successResponse } from '../../utils/response.js';
+import { pmsService } from '../pms/pmsService.js';
 
 /**
  * Valid room status transitions.
@@ -90,7 +91,7 @@ export const updateRoomStatus = async (req, res, next) => {
 
     const isReleased = status === 'Clean' || status === 'Inspected';
 
-    // 3. Atomic transaction: room update + task completion + trail + activity
+    // 3. Atomic transaction with 15s timeout for cloud DB latency
     const result = await prisma.$transaction(async (tx) => {
       // 3a. Update the room
       const updatedRoom = await tx.room.update({
@@ -153,11 +154,18 @@ export const updateRoomStatus = async (req, res, next) => {
       });
 
       return { updatedRoom, completedTaskIds };
-    });
+    }, { maxWait: 10000, timeout: 15000 });
+
+    // Asynchronously propagate space status change to Mews PMS if room is connected
+    if (existing?.mewsId) {
+      pmsService.syncRoomStatusToMews(hotelId, number, status).catch((err) => {
+        console.warn(`[RoomsController] Background Mews sync for room ${number} note:`, err.message);
+      });
+    }
 
     return successResponse(
       res,
-      { room: result.updatedRoom, completedTaskIds: result.completedTaskIds },
+      { ...result.updatedRoom, room: result.updatedRoom, completedTaskIds: result.completedTaskIds },
       `Room ${number} updated to ${status}`,
     );
   } catch (error) {
