@@ -183,10 +183,11 @@ async function main() {
   }
 
   for (const r of rooms) {
+    const targetHotelId = r.hotelId || 'hotel-mercier';
     await prisma.room.upsert({
-      where: { number: r.number },
-      update: r,
-      create: r,
+      where: { hotelId_number: { hotelId: targetHotelId, number: r.number } },
+      update: { ...r, hotelId: targetHotelId },
+      create: { ...r, hotelId: targetHotelId },
     });
   }
 
@@ -210,18 +211,60 @@ async function main() {
         children: 0,
         roomType: 'Deluxe King',
         status: 'In House',
-        rate: '€189 / night',
+        rate: '€185 / night',
       },
     },
     {
-      id: 'g-okonkwo',
-      name: 'Grace Okonkwo',
+      id: 'g-vandenberg',
+      name: 'Lukas van den Berg',
+      room: '104',
+      country: 'Netherlands',
+      language: 'Dutch',
+      vip: false,
+      previousStays: 1,
+      tags: JSON.stringify(['Business', 'Invoiced to company']),
+      reservation: {
+        number: 'MRC-48203',
+        arrival: '17 Aug',
+        departure: '18 Aug',
+        nights: 1,
+        adults: 1,
+        children: 0,
+        roomType: 'Superior Queen',
+        status: 'Checked Out',
+        rate: '€142 / night',
+      },
+    },
+    {
+      id: 'g-chen',
+      name: 'Mei-Ling Chen',
       room: '401',
+      country: 'Singapore',
+      language: 'English',
+      vip: true,
+      previousStays: 4,
+      tags: JSON.stringify(['VIP', 'Corner room preferred', 'High floor']),
+      reservation: {
+        number: 'MRC-48312',
+        arrival: '18 Aug',
+        departure: '23 Aug',
+        nights: 5,
+        adults: 2,
+        children: 1,
+        roomType: 'Executive Suite',
+        status: 'Confirmed',
+        rate: '€340 / night',
+      },
+    },
+    {
+      id: 'g-okafor',
+      name: 'Grace Okonkwo',
+      room: '215',
       country: 'United Kingdom',
       language: 'English',
       vip: false,
       previousStays: 0,
-      tags: JSON.stringify(['Early arrival 13:00']),
+      tags: JSON.stringify(['First time guest', 'Anniversary stay']),
       reservation: {
         number: 'MRC-48288',
         arrival: '18 Aug',
@@ -231,12 +274,12 @@ async function main() {
         children: 0,
         roomType: 'Deluxe King',
         status: 'Confirmed',
-        rate: '€196 / night',
+        rate: '€195 / night',
       },
     },
     {
-      id: 'g-tanabe',
-      name: 'Yuki Tanabe',
+      id: 'g-lindqvist',
+      name: 'Astrid Lindqvist',
       room: '307',
       country: 'Japan',
       language: 'English',
@@ -244,53 +287,32 @@ async function main() {
       previousStays: 5,
       tags: JSON.stringify(['VIP', 'Returning', 'Prefers high floor']),
       reservation: {
-        number: 'MRC-48301',
-        arrival: '18 Aug',
-        departure: '22 Aug',
-        nights: 4,
-        adults: 2,
-        children: 0,
-        roomType: 'Junior Suite',
-        status: 'Confirmed',
-        rate: '€268 / night',
-      },
-    },
-    {
-      id: 'g-raghavan',
-      name: 'Priya Raghavan',
-      room: '208',
-      country: 'India',
-      language: 'English',
-      vip: false,
-      previousStays: 0,
-      tags: JSON.stringify(['Baby cot requested']),
-      reservation: {
         number: 'MRC-48297',
         arrival: '18 Aug',
         departure: '21 Aug',
         nights: 3,
         adults: 2,
         children: 1,
-        roomType: 'Family Room',
+        roomType: 'Superior Queen',
         status: 'Confirmed',
-        rate: '€224 / night',
+        rate: '€165 / night',
       },
     },
   ];
 
-  for (const g of sampleGuests) {
-    const { reservation, ...guestData } = g;
+  for (const guestData of sampleGuests) {
+    const { reservation, ...guestFields } = guestData;
     await prisma.guest.upsert({
-      where: { id: guestData.id },
-      update: guestData,
-      create: guestData,
+      where: { id: guestFields.id },
+      update: guestFields,
+      create: guestFields,
     });
 
     if (reservation) {
       await prisma.reservation.upsert({
-        where: { number: reservation.number },
-        update: { ...reservation, guestId: guestData.id },
-        create: { ...reservation, guestId: guestData.id },
+        where: { hotelId_number: { hotelId: 'hotel-mercier', number: reservation.number } },
+        update: { ...reservation, guestId: guestData.id, hotelId: 'hotel-mercier' },
+        create: { ...reservation, guestId: guestData.id, hotelId: 'hotel-mercier' },
       });
     }
   }

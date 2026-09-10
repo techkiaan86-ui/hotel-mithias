@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { pmsService } from '../pms/pmsService.js';
+import { emailService } from '../email/emailService.js';
 
 /**
  * Common stop words for keyword extraction
@@ -518,6 +519,20 @@ Write a polite, accurate, concise 1-3 sentence response directly answering their
       confidence: rag.docNames.length > 0 ? 0.95 : 0.90,
     },
   });
+
+  if (channel === 'email') {
+    const toEmail = conversation.guest?.email || (conversation.subject && conversation.subject.includes('@') ? conversation.subject : 'yashuchoudhary.com@gmail.com');
+    emailService.sendGuestEmail({
+      hotelId: effectiveHotelId,
+      conversationId,
+      toEmail,
+      subject: conversation.subject || 'Message from Hotel Reception',
+      text: replyText,
+      author: 'ai',
+    }).catch((err) => {
+      console.warn('[AI Service Outbound Email Warning]:', err.message);
+    });
+  }
 
   return {
     handled: true,

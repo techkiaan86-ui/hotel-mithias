@@ -1,18 +1,49 @@
 /**
- * Official Mews Connector API Client wrapper
+ * Official Mews Connector API Client wrapper (Production-Grade & High Performance)
  */
+
+// In-memory catalog cache with 10-minute TTL to eliminate redundant Mews API calls
+const catalogCache = new Map();
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
 export class MewsClient {
   constructor() {
     this.clientToken = (process.env.MEWS_CLIENT_TOKEN || '').trim();
     this.systemAccessToken = (process.env.MEWS_ACCESS_TOKEN || '').trim();
-    // Base URL pointed to Mews Demo API
-    this.baseUrl = (process.env.MEWS_API_URL || 'https://api.mews-demo.com').replace(/\/api\/connector\/v1\/?$/, '').replace(/\/+$/, '');
+    // Base URL defaults to configured MEWS_API_URL or Mews Demo
+    this.baseUrl = (process.env.MEWS_API_URL || 'https://api.mews-demo.com')
+      .replace(/\/api\/connector\/v1\/?$/, '')
+      .replace(/\/+$/, '');
     this.cachedStayServiceId = (process.env.MEWS_STAY_SERVICE_ID || '').trim() || null;
   }
 
   /**
+   * Resolve token-specific cache entry
+   */
+  _getCached(token) {
+    if (!token) return null;
+    const entry = catalogCache.get(token);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+      catalogCache.delete(token);
+      return null;
+    }
+    return entry;
+  }
+
+  _setCached(token, data) {
+    if (!token) return;
+    const existing = catalogCache.get(token) || {};
+    catalogCache.set(token, {
+      ...existing,
+      ...data,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
    * Helper method to send authenticated POST requests to Mews API
-   * Implements Client identification, rate limiting (HTTP 429) backoff (5s, 10s, 15s) and retries.
+   * Implements Fast-Fail on Auth/Session errors, Client identification, and smart rate limiting.
    */
   async _post(path, accessToken, payload = {}) {
     const clientToken = (this.clientToken || '').trim();
@@ -40,8 +71,8 @@ export class MewsClient {
       ...payload,
     };
 
-    const maxAttempts = 2;
-    const backoffs = [1200, 2400]; // 1.2s, 2.4s backoff intervals for HTTP 429 rate limit recovery
+    const maxAttempts = 3;
+    const backoffs = [1500, 3000, 5000];
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -53,13 +84,13 @@ export class MewsClient {
             Accept: 'application/json',
           },
           body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
+          signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
         });
 
-        // Handle HTTP 429 Rate Limiting with Retry-After header and exponential backoff
+        // Handle HTTP 429 Rate Limiting
         if (response.status === 429) {
           const retryAfterHeader = response.headers?.get ? response.headers.get('Retry-After') : null;
-          let delay = backoffs[attempt - 1] || 15000;
+          let delay = backoffs[attempt - 1] || 3000;
           if (retryAfterHeader) {
             const parsed = parseInt(retryAfterHeader, 10);
             if (!isNaN(parsed) && parsed > 0) {
@@ -83,22 +114,34 @@ export class MewsClient {
           } catch {
             // ignore json parse error
           }
-          throw new Error(errorMessage);
+          const err = new Error(errorMessage);
+          err.status = response.status;
+          throw err;
         }
 
         return await response.json();
       } catch (err) {
         lastError = err;
-        const msg = String(err.message || '');
-        // Do not retry fatal client errors
-        if (
-          attempt < maxAttempts &&
-          !msg.includes('HTTP 400') &&
-          !msg.includes('HTTP 401') &&
-          !msg.includes('HTTP 403') &&
-          !msg.includes('HTTP 404')
-        ) {
-          const delay = backoffs[attempt - 1] || 5000;
+        const msg = String(err.message || '').toLowerCase();
+
+        // Immediate Fast-Fail on Auth & Session errors (0-delay abort)
+        const isAuthError =
+          msg.includes('expired') ||
+          msg.includes('session') ||
+          msg.includes('unauthorized') ||
+          msg.includes('forbidden') ||
+          msg.includes('cannot perform operation') ||
+          err.status === 401 ||
+          err.status === 403 ||
+          err.status === 400 ||
+          err.status === 404;
+
+        if (isAuthError) {
+          throw err; // Stop immediately, do not retry
+        }
+
+        if (attempt < maxAttempts) {
+          const delay = backoffs[attempt - 1] || 1000;
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
@@ -131,13 +174,17 @@ export class MewsClient {
         enterpriseName = configData.Enterprise.Name || configData.Enterprise.LegalName || '';
         raw = configData;
       }
-    } catch (configErr) {
+    } catch {
       // If /configuration/get is restricted or unavailable, validate via /customers/getAll
-      const custData = await this._post('/customers/getAll', cleanToken, {
-        Limitation: { Count: 1 },
-        FirstNames: ['a', 'e', 'i', 'o', 'u'],
-      });
-      raw = custData;
+      try {
+        const custData = await this._post('/customers/getAll', cleanToken, {
+          Limitation: { Count: 1 },
+          FirstNames: ['a', 'e', 'i', 'o', 'u'],
+        });
+        raw = custData;
+      } catch (custErr) {
+        console.warn('[MewsClient] Validation notice:', custErr.message);
+      }
     }
 
     if (!enterpriseId) {
@@ -160,17 +207,30 @@ export class MewsClient {
   }
 
   /**
-   * Fetch Services from Mews Connector API
+   * Fetch Services from Mews Connector API with In-Memory Caching
    * Endpoint: POST /api/connector/v1/services/getAll
    */
   async getServices(accessToken) {
+    const cached = this._getCached(accessToken);
+    if (cached?.services && cached.services.length > 0) {
+      return cached.services;
+    }
+
     try {
       const data = await this._post('/services/getAll', accessToken, {
         Limitation: { Count: 50 },
       });
-      return data.Services || [];
+      const services = data.Services || [];
+      const stayService = services.find(
+        (s) => s.Type === 'Stay' || s.Name?.toLowerCase().includes('stay')
+      );
+      this._setCached(accessToken, {
+        services,
+        stayServiceId: stayService?.Id || this.cachedStayServiceId || null,
+      });
+      return services;
     } catch (err) {
-      console.warn('[MewsClient] getServices error:', err.message);
+      console.warn('[MewsClient] getServices notice:', err.message);
       return [];
     }
   }
@@ -182,6 +242,10 @@ export class MewsClient {
     if (this.cachedStayServiceId) {
       return this.cachedStayServiceId;
     }
+    const cached = this._getCached(accessToken);
+    if (cached?.stayServiceId) {
+      return cached.stayServiceId;
+    }
     try {
       const services = await this.getServices(accessToken);
       const stayService = services.find(
@@ -189,18 +253,43 @@ export class MewsClient {
       );
       if (stayService?.Id) {
         this.cachedStayServiceId = stayService.Id;
+        this._setCached(accessToken, { stayServiceId: stayService.Id });
         return stayService.Id;
       }
     } catch (err) {
-      console.warn('[MewsClient] getStayServiceId error:', err.message);
+      console.warn('[MewsClient] getStayServiceId notice:', err.message);
     }
     return process.env.MEWS_STAY_SERVICE_ID || null;
   }
 
   /**
+   * Update Room/Space cleaning or condition state in Mews Connector API
+   * Endpoint: POST /api/connector/v1/spaces/updateState
+   */
+  async updateSpaceState(accessToken, spaceId, state) {
+    if (!spaceId || !state) return null;
+    const mewsStateMap = {
+      Clean: 'Clean',
+      Dirty: 'Dirty',
+      Inspected: 'Inspected',
+      Maintenance: 'OutOfOrder',
+      Blocked: 'OutOfService',
+    };
+    const mewsState = mewsStateMap[state] || state;
+    try {
+      return await this._post('/spaces/updateState', accessToken, {
+        SpaceId: spaceId,
+        State: mewsState,
+      });
+    } catch (err) {
+      console.warn('[MewsClient] updateSpaceState notice:', err.message);
+      return null;
+    }
+  }
+
+  /**
    * Fetch Resources/Rooms from Mews Connector API
    * Endpoint: POST /api/connector/v1/resources/getAll
-   * Extent: { Resources: true, ResourceCategories: true } and limitation count 100
    */
   async getResources(accessToken, options = {}) {
     const data = await this._post('/resources/getAll', accessToken, {
@@ -214,7 +303,6 @@ export class MewsClient {
   /**
    * Fetch Customers/Guests from Mews Connector API
    * Endpoint: POST /api/connector/v1/customers/getAll
-   * With FirstNames filter ["a", "e", "i", "o", "u"] and fallback to safe UTC range, limitation count 50
    */
   async getCustomers(accessToken, options = {}) {
     const limit = options.limit || 50;
@@ -230,7 +318,10 @@ export class MewsClient {
         return data.Customers;
       }
     } catch (err) {
-      console.warn('[MewsClient] getCustomers FirstNames query fallback:', err.message);
+      // If auth error, fast-fail immediately
+      if (String(err.message).toLowerCase().includes('expired') || String(err.message).toLowerCase().includes('session')) {
+        throw err;
+      }
     }
 
     // 2. Safe UTC range fallback
@@ -252,12 +343,9 @@ export class MewsClient {
   /**
    * Fetch Reservations from Mews Connector API
    * Endpoint: POST /api/connector/v1/reservations/getAll
-   * Formatted strictly as ISO-8601 UTC strings.
-   * Root-level StartUtc/EndUtc within a 72-hour window to satisfy Mews's < 100h interval limit.
    */
   async getReservations(accessToken, options = {}) {
     const now = new Date();
-    // Strictly 72-hour window (24h back to 48h ahead) to satisfy Mews < 100h interval limit
     const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
     const end = new Date(start.getTime() + 72 * 60 * 60 * 1000); // 72 hours total window
 
@@ -265,7 +353,7 @@ export class MewsClient {
     const endUtc = end.toISOString();
     const limit = options.limit || 50;
 
-    // 1. Primary: Mews Connector API v1 valid root-level schema for colliding reservations
+    // 1. Primary: Mews Colliding reservations
     try {
       const data = await this._post('/reservations/getAll', accessToken, {
         TimeFilter: 'Colliding',
@@ -278,8 +366,9 @@ export class MewsClient {
         return data.Reservations;
       }
     } catch (collidingErr) {
-      console.warn('[MewsClient] Colliding reservations query attempt:', collidingErr.message);
-      // Try nested CollidingUtc format if API version prefers nested
+      if (String(collidingErr.message).toLowerCase().includes('expired') || String(collidingErr.message).toLowerCase().includes('session')) {
+        throw collidingErr;
+      }
       try {
         const data = await this._post('/reservations/getAll', accessToken, {
           CollidingUtc: { StartUtc: startUtc, EndUtc: endUtc },
@@ -290,11 +379,13 @@ export class MewsClient {
           return data.Reservations;
         }
       } catch (nestedErr) {
-        console.warn('[MewsClient] Nested CollidingUtc query attempt:', nestedErr.message);
+        if (String(nestedErr.message).toLowerCase().includes('expired') || String(nestedErr.message).toLowerCase().includes('session')) {
+          throw nestedErr;
+        }
       }
     }
 
-    // 2. Secondary: Fallback to recent reservations via TimeFilter: "Created" (past 30 days)
+    // 2. Secondary: Fallback to recent reservations via TimeFilter: "Created"
     try {
       const createdStartUtc = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const createdEndUtc = now.toISOString();
@@ -307,7 +398,6 @@ export class MewsClient {
       });
       return data.Reservations || [];
     } catch (createdErr) {
-      console.warn('[MewsClient] Created filter reservations query attempt:', createdErr.message);
       return [];
     }
   }
@@ -329,7 +419,7 @@ export class MewsClient {
       });
       return data.ResourceCategoryAvailabilities || [];
     } catch (err) {
-      console.warn('[MewsClient] getAvailability warning:', err.message);
+      console.warn('[MewsClient] getAvailability notice:', err.message);
       return [];
     }
   }
@@ -347,7 +437,7 @@ export class MewsClient {
       });
       return data.Rates || [];
     } catch (err) {
-      console.warn('[MewsClient] getRates warning:', err.message);
+      console.warn('[MewsClient] getRates notice:', err.message);
       return [];
     }
   }
@@ -361,11 +451,11 @@ export class MewsClient {
     try {
       const data = await this._post('/spaces/update', accessToken, {
         SpaceId: spaceId,
-        State: status, // e.g. 'Clean', 'Dirty', 'Inspected'
+        State: status,
       });
       return { success: true, data };
     } catch (err) {
-      console.warn('[MewsClient] updateSpaceStatus warning:', err.message);
+      console.warn('[MewsClient] updateSpaceStatus notice:', err.message);
       return { success: false, error: err.message };
     }
   }

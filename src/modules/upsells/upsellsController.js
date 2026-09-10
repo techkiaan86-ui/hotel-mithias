@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { errorResponse, successResponse } from '../../utils/response.js';
+import { realtimeService } from '../../services/realtimeService.js';
 
 export const getUpsells = async (req, res, next) => {
   try {
@@ -41,6 +42,8 @@ export const updateUpsellStatus = async (req, res, next) => {
       where: { id },
       data: { status },
     });
+
+    realtimeService.broadcastToHotel(hotelId, 'upsell:updated', updated);
 
     return successResponse(res, updated, `Upsell updated to ${status}`);
   } catch (error) {

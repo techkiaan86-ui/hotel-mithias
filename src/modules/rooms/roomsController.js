@@ -95,7 +95,7 @@ export const updateRoomStatus = async (req, res, next) => {
     const result = await prisma.$transaction(async (tx) => {
       // 3a. Update the room
       const updatedRoom = await tx.room.update({
-        where: { number }, // number is @id (PK) — safe because we verified hotelId above
+        where: { hotelId_number: { hotelId, number } },
         data: {
           status,
           cleaner: cleaner !== undefined ? cleaner : existing.cleaner,

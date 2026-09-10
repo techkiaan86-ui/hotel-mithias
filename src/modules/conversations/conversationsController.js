@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { errorResponse, successResponse } from '../../utils/response.js';
+import { emailService } from '../email/emailService.js';
 
 export const getConversations = async (req, res, next) => {
   try {
@@ -25,24 +26,40 @@ export const getConversations = async (req, res, next) => {
       orderBy: { lastAt: 'desc' },
     });
 
-    const parsed = conversations.map((c) => ({
-      ...c,
-      channels: c.primaryChannel ? [c.primaryChannel] : ['whatsapp'],
-      knowledgeUsed: JSON.parse(c.knowledgeUsed || '[]'),
-      upsellIdeas: JSON.parse(c.upsellIdeas || '[]'),
-      taskIds: JSON.parse(c.taskIds || '[]'),
-      escalation: c.escalation ? JSON.parse(c.escalation) : undefined,
-      guest: {
-        ...c.guest,
-        tags: JSON.parse(c.guest?.tags || '[]'),
-        reservation: c.guest?.reservations?.[0] || null,
-      },
-      messages: (c.messages || []).map((m) => ({
-        ...m,
-        knowledge: JSON.parse(m.knowledge || '[]'),
-        buttons: JSON.parse(m.buttons || '[]'),
-      })),
-    }));
+    const allHotelReservations = await prisma.reservation.findMany({
+      where: { hotelId },
+    });
+
+    const parsed = conversations.map((c) => {
+      let resObj = c.guest?.reservations?.[0] || null;
+      if (!resObj && allHotelReservations.length > 0) {
+        if (c.guest?.room) {
+          resObj = allHotelReservations.find((r) => r.room === c.guest.room) || null;
+        }
+        if (!resObj && c.guest?.name) {
+          resObj = allHotelReservations.find((r) => r.guestId === c.guest.id || r.mewsId === c.guest.mewsId) || null;
+        }
+      }
+
+      return {
+        ...c,
+        channels: c.primaryChannel ? [c.primaryChannel] : ['whatsapp'],
+        knowledgeUsed: JSON.parse(c.knowledgeUsed || '[]'),
+        upsellIdeas: JSON.parse(c.upsellIdeas || '[]'),
+        taskIds: JSON.parse(c.taskIds || '[]'),
+        escalation: c.escalation ? JSON.parse(c.escalation) : undefined,
+        guest: {
+          ...c.guest,
+          tags: JSON.parse(c.guest?.tags || '[]'),
+          reservation: resObj,
+        },
+        messages: (c.messages || []).map((m) => ({
+          ...m,
+          knowledge: JSON.parse(m.knowledge || '[]'),
+          buttons: JSON.parse(m.buttons || '[]'),
+        })),
+      };
+    });
 
     return successResponse(res, parsed, 'Conversations list');
   } catch (error) {
@@ -73,6 +90,16 @@ export const getConversationById = async (req, res, next) => {
       return errorResponse(res, 'Conversation not found', 404);
     }
 
+    let resObj = conversation.guest?.reservations?.[0] || null;
+    if (!resObj) {
+      if (conversation.guest?.room) {
+        resObj = await prisma.reservation.findFirst({ where: { hotelId, room: conversation.guest.room } });
+      }
+      if (!resObj && conversation.guest?.id) {
+        resObj = await prisma.reservation.findFirst({ where: { hotelId, guestId: conversation.guest.id } });
+      }
+    }
+
     const parsed = {
       ...conversation,
       channels: conversation.primaryChannel ? [conversation.primaryChannel] : ['whatsapp'],
@@ -83,7 +110,7 @@ export const getConversationById = async (req, res, next) => {
       guest: {
         ...conversation.guest,
         tags: JSON.parse(conversation.guest?.tags || '[]'),
-        reservation: conversation.guest?.reservations?.[0] || null,
+        reservation: resObj,
       },
       messages: (conversation.messages || []).map((m) => ({
         ...m,
@@ -122,13 +149,14 @@ export const sendReply = async (req, res, next) => {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const msgId = `m-${Date.now()}`;
+    const targetChannel = channel || conv.primaryChannel || 'email';
 
     const message = await prisma.message.create({
       data: {
         id: msgId,
         conversationId: id,
         author: 'staff',
-        channel: channel || conv.primaryChannel,
+        channel: targetChannel,
         body,
         at: timeStr,
         staffName,
@@ -143,6 +171,30 @@ export const sendReply = async (req, res, next) => {
         unread: 0,
       },
     });
+
+    // Real Outbound Email Dispatch via Gmail API
+    if (targetChannel === 'email') {
+      let toEmail = req.body.toEmail;
+      if (!toEmail) {
+        if (conv.guest?.email) {
+          toEmail = conv.guest.email;
+        } else if (conv.subject && conv.subject.includes('@')) {
+          toEmail = conv.subject;
+        } else {
+          toEmail = 'yashuchoudhary.com@gmail.com';
+        }
+      }
+      emailService.sendGuestEmail({
+        hotelId,
+        conversationId: id,
+        toEmail,
+        subject: conv.subject || 'Message from Hotel Reception',
+        text: body,
+        author: 'staff',
+      }).catch((err) => {
+        console.warn('[SendReply Outbound Email Warning]:', err.message);
+      });
+    }
 
     await prisma.activityItem.create({
       data: {

@@ -58,7 +58,7 @@ model User {
 }
 
 model Room {
-  number       String  @id
+  number       String
   mewsId       String?
   hotelId      String  @default("hotel-mercier")
   floor        Int
@@ -72,6 +72,7 @@ model Room {
   note         String? @db.Text
   updatedAt    String
 
+  @@id([hotelId, number])
   @@index([hotelId, status])
   @@index([hotelId, mewsId])
   @@index([hotelId])
@@ -87,7 +88,7 @@ model Guest {
   language      String
   vip           Boolean        @default(false)
   previousStays Int            @default(0)
-  tags          String         @default("[]")
+  tags          String         @default("[]") @db.VarChar(2048)
   reservations  Reservation[]
   conversations Conversation[]
   createdAt     DateTime       @default(now())
@@ -99,7 +100,7 @@ model Guest {
 }
 
 model Reservation {
-  number    String   @id
+  number    String
   mewsId    String?
   hotelId   String   @default("hotel-mercier")
   guestId   String
@@ -114,6 +115,7 @@ model Reservation {
   createdAt DateTime @default(now())
   guest     Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
 
+  @@id([hotelId, number])
   @@index([guestId], map: "Reservation_guestId_fkey")
   @@index([hotelId, status])
   @@index([hotelId, arrival])
@@ -131,9 +133,9 @@ model Conversation {
   subject        String
   summary        String    @db.Text
   suggestedReply String    @db.Text
-  knowledgeUsed  String?   @db.Text
-  upsellIdeas    String?   @db.Text
-  taskIds        String?   @db.Text
+  knowledgeUsed  String    @default("[]") @db.VarChar(2048)
+  upsellIdeas    String    @default("[]") @db.VarChar(2048)
+  taskIds        String    @default("[]") @db.VarChar(2048)
   escalation     String?   @db.Text
   unread         Int       @default(0)
   lastAt         String
