@@ -22,6 +22,22 @@ router.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'hotelogx-connect-backend', timestamp: new Date().toISOString() });
 });
 
+router.get('/health-diag', async (req, res) => {
+  try {
+    const { prisma } = await import('./config/database.js');
+    const cols = await prisma.$queryRawUnsafe('SHOW COLUMNS FROM EmailIntegration;').catch((e) => e.message);
+    const dbUrl = (process.env.DATABASE_URL || '').replace(/:[^:@]+@/, ':***@');
+    res.json({
+      dbUrl,
+      columns: Array.isArray(cols) ? cols.map((c) => c.Field) : cols,
+      env: process.env.NODE_ENV,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/email-detect', handleEmailDetect);
 
 router.use('/auth', authRoutes);

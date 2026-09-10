@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "start": "npx prisma generate && node src/server.js",
     "postinstall": "prisma generate",
     "test": "node --test src/tests/*.test.js",
     "prisma:generate": "prisma generate",
@@ -25,11 +25,11 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.3.0",
     "pdf-parse": "^2.4.5",
+    "prisma": "^6.4.1",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9",
-    "prisma": "^6.4.1"
+    "nodemon": "^3.1.9"
   },
   "allowScripts": {
     "@prisma/client@6.19.3": true

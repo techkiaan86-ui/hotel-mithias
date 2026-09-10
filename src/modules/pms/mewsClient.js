@@ -6,14 +6,31 @@
 const catalogCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
+// Official Mews API Server Endpoints
+const OFFICIAL_MEWS_SERVERS = [
+  'https://api.mews.com',
+  'https://api.mews-demo.com',
+  'https://api.mews.li',
+];
+
 export class MewsClient {
   constructor() {
     this.clientToken = (process.env.MEWS_CLIENT_TOKEN || '').trim();
     this.systemAccessToken = (process.env.MEWS_ACCESS_TOKEN || '').trim();
-    // Base URL defaults to configured MEWS_API_URL or Mews Demo
-    this.baseUrl = (process.env.MEWS_API_URL || 'https://api.mews-demo.com')
+    
+    // Normalize configured URL if provided
+    const configuredUrl = (process.env.MEWS_API_URL || '')
       .replace(/\/api\/connector\/v1\/?$/, '')
       .replace(/\/+$/, '');
+    
+    // Build ordered candidate list (Configured URL -> Production -> Demo -> Regional)
+    const candidates = [];
+    if (configuredUrl) candidates.push(configuredUrl);
+    for (const s of OFFICIAL_MEWS_SERVERS) {
+      if (!candidates.includes(s)) candidates.push(s);
+    }
+    this.candidateUrls = candidates;
+    this.baseUrl = configuredUrl || 'https://api.mews-demo.com';
     this.cachedStayServiceId = (process.env.MEWS_STAY_SERVICE_ID || '').trim() || null;
   }
 
@@ -43,9 +60,12 @@ export class MewsClient {
 
   /**
    * Helper method to send authenticated POST requests to Mews API
-   * Implements Fast-Fail on Auth/Session errors, Client identification, and smart rate limiting.
+   * Automatically routes to token's verified live server (Production vs Demo).
    */
-  async _post(path, accessToken, payload = {}) {
+  async _post(path, accessToken, payload = {}, options = {}) {
+    const overrideBaseUrl = typeof options === 'string' ? options : options.overrideBaseUrl;
+    const isProbe = typeof options === 'object' && Boolean(options.isProbe);
+
     const clientToken = (this.clientToken || '').trim();
     if (!clientToken) {
       throw new Error('MEWS_CLIENT_TOKEN environment variable is not configured');
@@ -58,10 +78,14 @@ export class MewsClient {
       throw new Error('Valid Mews Access Token or property credential is required');
     }
 
+    // Determine target base URL (Override -> Token-specific resolved URL -> Default baseUrl)
+    const cachedEntry = this._getCached(token);
+    const activeBaseUrl = overrideBaseUrl || cachedEntry?.resolvedBaseUrl || this.baseUrl;
+
     const cleanPath = path.startsWith('/api/connector/v1')
       ? path
       : `/api/connector/v1${path.startsWith('/') ? path : `/${path}`}`;
-    const endpoint = `${this.baseUrl}${cleanPath}`;
+    const endpoint = `${activeBaseUrl}${cleanPath}`;
     const httpFetch = globalThis.fetch || fetch;
 
     const requestBody = {
@@ -71,8 +95,9 @@ export class MewsClient {
       ...payload,
     };
 
-    const maxAttempts = 3;
+    const maxAttempts = isProbe ? 1 : 3;
     const backoffs = [1500, 3000, 5000];
+    const timeoutMs = isProbe ? 5000 : 10000;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -84,11 +109,16 @@ export class MewsClient {
             Accept: 'application/json',
           },
           body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+          signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
         });
 
         // Handle HTTP 429 Rate Limiting
         if (response.status === 429) {
+          if (isProbe) {
+            const err = new Error('Rate limited on candidate server');
+            err.status = 429;
+            throw err;
+          }
           const retryAfterHeader = response.headers?.get ? response.headers.get('Retry-After') : null;
           let delay = backoffs[attempt - 1] || 3000;
           if (retryAfterHeader) {
@@ -134,7 +164,8 @@ export class MewsClient {
           err.status === 401 ||
           err.status === 403 ||
           err.status === 400 ||
-          err.status === 404;
+          err.status === 404 ||
+          isProbe;
 
         if (isAuthError) {
           throw err; // Stop immediately, do not retry
@@ -153,8 +184,9 @@ export class MewsClient {
   }
 
   /**
-   * Validates Mews Connector API credentials with Mews API.
-   * Dynamically extracts Enterprise Name, Property ID, and confirms connectivity.
+   * Validates Mews Connector API credentials against official Mews servers.
+   * Auto-detects whether the token belongs to Production (api.mews.com) or Demo (api.mews-demo.com).
+   * Dynamically extracts Enterprise Name, Property ID, and establishes verified real connection.
    */
   async validateEnterpriseAccess(tokenOrPropertyId) {
     const cleanToken = (tokenOrPropertyId && String(tokenOrPropertyId).trim()) || '';
@@ -165,39 +197,70 @@ export class MewsClient {
     let enterpriseId = '';
     let enterpriseName = '';
     let raw = null;
+    let verifiedBaseUrl = null;
+    let lastAuthError = null;
 
-    // 1. Try to fetch enterprise configuration from Mews Connector API
-    try {
-      const configData = await this._post('/configuration/get', cleanToken, {});
-      if (configData?.Enterprise) {
-        enterpriseId = configData.Enterprise.Id || '';
-        enterpriseName = configData.Enterprise.Name || configData.Enterprise.LegalName || '';
-        raw = configData;
-      }
-    } catch {
-      // If /configuration/get is restricted or unavailable, validate via /customers/getAll
+    // Iterate across candidate Mews environments (Configured -> Production -> Demo)
+    for (const candidateUrl of this.candidateUrls) {
       try {
-        const custData = await this._post('/customers/getAll', cleanToken, {
-          Limitation: { Count: 1 },
-          FirstNames: ['a', 'e', 'i', 'o', 'u'],
+        // 1. Try to fetch enterprise configuration (Probe mode)
+        const configData = await this._post('/configuration/get', cleanToken, {}, {
+          overrideBaseUrl: candidateUrl,
+          isProbe: true,
         });
-        raw = custData;
-      } catch (custErr) {
-        console.warn('[MewsClient] Validation notice:', custErr.message);
+        if (configData?.Enterprise) {
+          enterpriseId = configData.Enterprise.Id || '';
+          enterpriseName = configData.Enterprise.Name || configData.Enterprise.LegalName || '';
+          raw = configData;
+          verifiedBaseUrl = candidateUrl;
+          break;
+        }
+      } catch (err) {
+        lastAuthError = err;
+        // 2. Try customer probe if configuration/get is restricted
+        try {
+          const custData = await this._post('/customers/getAll', cleanToken, {
+            Limitation: { Count: 1 },
+            FirstNames: ['a', 'e', 'i', 'o', 'u'],
+          }, {
+            overrideBaseUrl: candidateUrl,
+            isProbe: true,
+          });
+          if (custData && (custData.Customers || Array.isArray(custData))) {
+            raw = custData;
+            verifiedBaseUrl = candidateUrl;
+            break;
+          }
+        } catch (custErr) {
+          lastAuthError = custErr;
+        }
       }
     }
+
+    if (!verifiedBaseUrl) {
+      const errMsg = lastAuthError?.message || 'Invalid Mews Access Token or unreachable Mews API';
+      throw new Error(`Mews authentication failed: ${errMsg}`);
+    }
+
+    // Cache verified live server for this token
+    this._setCached(cleanToken, { resolvedBaseUrl: verifiedBaseUrl });
+    this.baseUrl = verifiedBaseUrl;
 
     if (!enterpriseId) {
       enterpriseId = cleanToken.length >= 8 ? cleanToken.slice(0, 8) : cleanToken;
     }
     if (!enterpriseName) {
-      enterpriseName = 'Mews Connected Property';
+      enterpriseName = verifiedBaseUrl.includes('demo') ? 'Mews Demo Property' : 'Mews Production Property';
     }
+
+    const environmentType = verifiedBaseUrl.includes('demo') ? 'sandbox' : 'production';
+    console.log(`[MewsClient] Connected successfully to Mews (${environmentType}) at ${verifiedBaseUrl}`);
 
     return {
       success: true,
       status: 'connected',
       pmsType: 'mews',
+      environment: environmentType,
       propertyId: enterpriseId,
       enterpriseId,
       enterpriseName,
