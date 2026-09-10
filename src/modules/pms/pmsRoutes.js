@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   connectPmsController,
+  disconnectPmsController,
   getPmsStatusController,
   syncPmsController,
   checkAvailabilityController,
@@ -33,6 +34,7 @@ const resolveHotelContext = (req, res, next) => {
 
 // Authenticated/Context PMS management endpoints
 router.post('/connect', resolveHotelContext, connectPmsController);
+router.post('/disconnect', resolveHotelContext, disconnectPmsController);
 router.post('/verify', resolveHotelContext, connectPmsController);
 router.get('/status', resolveHotelContext, getPmsStatusController);
 router.post('/sync', resolveHotelContext, syncPmsController);

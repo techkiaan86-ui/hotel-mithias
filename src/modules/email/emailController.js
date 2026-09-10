@@ -30,7 +30,8 @@ export const initiateGoogleOAuthController = async (req, res) => {
     const hotelId = req.user?.hotelId || req.query.hotelId || req.headers['x-hotel-id'] || 'hotel-mercier';
     const redirectBack = req.query.redirectBack || '/onboarding';
 
-    const authUrl = gmailClient.getGoogleOAuthUrl(hotelId, redirectBack);
+    const callerFrontend = getFrontendBaseUrl(req);
+    const authUrl = gmailClient.getGoogleOAuthUrl(hotelId, redirectBack, callerFrontend);
 
     if (req.query.redirect === 'true' || req.query.mode === 'redirect') {
       return res.redirect(authUrl);
@@ -48,7 +49,12 @@ export const initiateGoogleOAuthController = async (req, res) => {
  */
 export const googleOAuthCallbackController = async (req, res) => {
   const { code, state, error, error_description } = req.query;
-  const frontendUrl = getFrontendBaseUrl(req);
+
+  // Cryptographically verify signed state token
+  const stateCheck = verifyOAuthState(state);
+  const frontendUrl = (stateCheck.valid && stateCheck.payload?.frontendOrigin)
+    ? stateCheck.payload.frontendOrigin
+    : getFrontendBaseUrl(req);
 
   // If user denied access or Google reported an error
   if (error) {
@@ -60,8 +66,6 @@ export const googleOAuthCallbackController = async (req, res) => {
     return res.redirect(`${frontendUrl}/onboarding?oauth_status=error&message=${encodeURIComponent('Missing authorization code or state parameter')}`);
   }
 
-  // Cryptographically verify signed state token
-  const stateCheck = verifyOAuthState(state);
   if (!stateCheck.valid || !stateCheck.payload?.hotelId) {
     return res.redirect(`${frontendUrl}/onboarding?oauth_status=error&message=${encodeURIComponent(stateCheck.error || 'Invalid or expired OAuth state')}`);
   }

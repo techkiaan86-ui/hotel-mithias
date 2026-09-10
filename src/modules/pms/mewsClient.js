@@ -20,9 +20,11 @@ export class MewsClient {
       throw new Error('MEWS_CLIENT_TOKEN environment variable is not configured');
     }
 
-    const token = (accessToken && String(accessToken).trim()) || this.systemAccessToken;
+    const token = (accessToken !== undefined && accessToken !== null && String(accessToken).trim() !== '')
+      ? String(accessToken).trim()
+      : this.systemAccessToken;
     if (!token || token.trim().length < 4) {
-      throw new Error('Valid Mews AccessToken or property credential is required');
+      throw new Error('Valid Mews Access Token or property credential is required');
     }
 
     const cleanPath = path.startsWith('/api/connector/v1')
@@ -38,8 +40,8 @@ export class MewsClient {
       ...payload,
     };
 
-    const maxAttempts = 3;
-    const backoffs = [5000, 10000, 15000]; // 5s, 10s, 15s backoff intervals
+    const maxAttempts = 2;
+    const backoffs = [1200, 2400]; // 1.2s, 2.4s backoff intervals for HTTP 429 rate limit recovery
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -51,7 +53,7 @@ export class MewsClient {
             Accept: 'application/json',
           },
           body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+          signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
         });
 
         // Handle HTTP 429 Rate Limiting with Retry-After header and exponential backoff
@@ -108,31 +110,52 @@ export class MewsClient {
   }
 
   /**
-   * Validates Mews Connector API credentials using POST /api/connector/v1/customers/getAll
-   * Payload: { ClientToken, AccessToken, Client: "HotelPlatform 1.0.0", Limitation: { Count: 1 }, FirstNames: ["a", "e", "i", "o", "u"] }
-   * On HTTP 200: Returns { success: true, status: "connected", pmsType: "mews", propertyId: "851d178" }
+   * Validates Mews Connector API credentials with Mews API.
+   * Dynamically extracts Enterprise Name, Property ID, and confirms connectivity.
    */
   async validateEnterpriseAccess(tokenOrPropertyId) {
-    const cleanInput = (tokenOrPropertyId && String(tokenOrPropertyId).trim()) || '';
-    const tokenToTry = (cleanInput.length >= 20 && cleanInput.includes('-'))
-      ? cleanInput
-      : (this.systemAccessToken || cleanInput);
+    const cleanToken = (tokenOrPropertyId && String(tokenOrPropertyId).trim()) || '';
+    if (!cleanToken || cleanToken.length < 4) {
+      throw new Error('Valid Mews Access Token is required');
+    }
 
-    // Call POST /api/connector/v1/customers/getAll
-    const data = await this._post('/customers/getAll', tokenToTry, {
-      Limitation: { Count: 1 },
-      FirstNames: ['a', 'e', 'i', 'o', 'u'],
-    });
+    let enterpriseId = '';
+    let enterpriseName = '';
+    let raw = null;
+
+    // 1. Try to fetch enterprise configuration from Mews Connector API
+    try {
+      const configData = await this._post('/configuration/get', cleanToken, {});
+      if (configData?.Enterprise) {
+        enterpriseId = configData.Enterprise.Id || '';
+        enterpriseName = configData.Enterprise.Name || configData.Enterprise.LegalName || '';
+        raw = configData;
+      }
+    } catch (configErr) {
+      // If /configuration/get is restricted or unavailable, validate via /customers/getAll
+      const custData = await this._post('/customers/getAll', cleanToken, {
+        Limitation: { Count: 1 },
+        FirstNames: ['a', 'e', 'i', 'o', 'u'],
+      });
+      raw = custData;
+    }
+
+    if (!enterpriseId) {
+      enterpriseId = cleanToken.length >= 8 ? cleanToken.slice(0, 8) : cleanToken;
+    }
+    if (!enterpriseName) {
+      enterpriseName = 'Mews Connected Property';
+    }
 
     return {
       success: true,
       status: 'connected',
       pmsType: 'mews',
-      propertyId: '851d178',
-      enterpriseId: '851d178',
-      enterpriseName: 'Mews Demo Property',
-      accessTokenUsed: tokenToTry,
-      raw: data,
+      propertyId: enterpriseId,
+      enterpriseId,
+      enterpriseName,
+      accessTokenUsed: cleanToken,
+      raw,
     };
   }
 

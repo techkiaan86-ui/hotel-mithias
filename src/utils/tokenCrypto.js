@@ -69,11 +69,12 @@ export function decryptToken(encryptedString) {
 /**
  * Generates a signed OAuth state token containing hotelId, timestamp, and HMAC signature
  */
-export function generateOAuthState(hotelId, redirectBack = '/onboarding') {
+export function generateOAuthState(hotelId, redirectBack = '/onboarding', frontendOrigin = null) {
   if (!hotelId) throw new Error('hotelId is required for OAuth state generation');
   const payload = {
     hotelId,
     redirectBack,
+    frontendOrigin,
     ts: Date.now(),
     nonce: crypto.randomBytes(8).toString('hex'),
   };

@@ -8,3 +8,4 @@ app.listen(PORT, () => {
   console.log(`📡 Environment: ${config.nodeEnv}`);
   console.log(`🔗 Hotel check: http://localhost:${PORT}`);
 });
+// Trigger nodemon reload for updated Google OAuth credentials in .env

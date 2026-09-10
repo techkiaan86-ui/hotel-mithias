@@ -131,9 +131,9 @@ model Conversation {
   subject        String
   summary        String    @db.Text
   suggestedReply String    @db.Text
-  knowledgeUsed  String    @default("[]")
-  upsellIdeas    String    @default("[]")
-  taskIds        String    @default("[]")
+  knowledgeUsed  String?   @db.Text
+  upsellIdeas    String?   @db.Text
+  taskIds        String?   @db.Text
   escalation     String?   @db.Text
   unread         Int       @default(0)
   lastAt         String

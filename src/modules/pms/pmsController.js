@@ -12,16 +12,36 @@ export const connectPmsController = async (req, res) => {
     // Tenant isolation: Resolve hotel ID from authenticated user, never from request body
     const hotelId = req.user?.hotelId || 'hotel-mercier';
 
-    if (!propertyId || typeof propertyId !== 'string') {
-      return errorResponse(res, 'Property ID is required', 400);
+    if (!propertyId || typeof propertyId !== 'string' || propertyId.trim().length < 4) {
+      return errorResponse(res, 'Valid Mews Access Token or Property ID is required', 400);
     }
 
     const result = await pmsService.connectPms(hotelId, { provider, propertyId });
 
     return successResponse(res, result, 'PMS connected successfully');
   } catch (error) {
-    const statusCode = error.message.includes('required') || error.message.includes('not supported') ? 400 : 500;
+    const isClientError =
+      error.message.includes('required') ||
+      error.message.includes('not supported') ||
+      error.message.includes('Mews API') ||
+      error.message.includes('HTTP 40') ||
+      error.message.includes('Invalid');
+    const statusCode = isClientError ? 400 : 500;
     return errorResponse(res, error.message, statusCode);
+  }
+};
+
+/**
+ * Controller disconnecting PMS integration
+ * Endpoint: POST /api/pms/disconnect
+ */
+export const disconnectPmsController = async (req, res) => {
+  try {
+    const hotelId = req.user?.hotelId || 'hotel-mercier';
+    const result = await pmsService.disconnectPms(hotelId);
+    return successResponse(res, result, 'PMS disconnected successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
   }
 };
 

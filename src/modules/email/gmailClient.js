@@ -16,7 +16,7 @@ export const gmailClient = {
   /**
    * Generates the Google OAuth 2.0 Authorization URL with signed state
    */
-  getGoogleOAuthUrl(hotelId, redirectBack = '/onboarding') {
+  getGoogleOAuthUrl(hotelId, redirectBack = '/onboarding', frontendOrigin = null) {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/email/oauth/google/callback';
 
@@ -24,7 +24,7 @@ export const gmailClient = {
       throw new Error('GOOGLE_CLIENT_ID is not configured in environment variables');
     }
 
-    const state = generateOAuthState(hotelId, redirectBack);
+    const state = generateOAuthState(hotelId, redirectBack, frontendOrigin);
 
     const params = new URLSearchParams({
       client_id: clientId,
