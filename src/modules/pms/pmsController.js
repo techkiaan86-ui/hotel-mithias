@@ -21,12 +21,22 @@ export const connectPmsController = async (req, res) => {
     return successResponse(res, result, 'PMS connected successfully');
   } catch (error) {
     const isClientError =
-      error.message.includes('required') ||
-      error.message.includes('not supported') ||
-      error.message.includes('Mews API') ||
-      error.message.includes('HTTP 40') ||
-      error.message.includes('Invalid');
-    const statusCode = isClientError ? 400 : 500;
+      Boolean(error.statusCode && error.statusCode < 500) ||
+      error.message?.includes('required') ||
+      error.message?.includes('not supported') ||
+      error.message?.includes('Mews') ||
+      error.message?.includes('authentication failed') ||
+      error.message?.includes('HTTP 40') ||
+      error.message?.includes('Invalid');
+
+    const statusCode = error.statusCode || (isClientError ? 400 : 500);
+
+    if (statusCode < 500) {
+      console.warn(`[PMS Connect Notice] Client validation: ${error.message}`);
+    } else {
+      console.error(`[PMS Connect Error] Server error:`, error);
+    }
+
     return errorResponse(res, error.message, statusCode);
   }
 };

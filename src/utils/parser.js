@@ -9,22 +9,21 @@ export async function parseFile(file) {
   const buffer = file.buffer;
 
   if (mime === 'application/pdf' || ext === 'pdf') {
-    if (!buffer.includes(Buffer.from('%%EOF'))) {
-      throw new Error('File parsing failed: Corrupted PDF structure');
-    }
-    try {
-      const { createRequire } = await import('module');
-      const req = createRequire(import.meta.url);
-      const pdfParseModule = req('pdf-parse');
-      const parseFn = typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule?.default;
-      if (typeof parseFn === 'function') {
-        const data = await parseFn(buffer);
-        if (data && data.text && data.text.trim()) {
-          return data.text;
+    if (buffer.includes(Buffer.from('%%EOF'))) {
+      try {
+        const { createRequire } = await import('module');
+        const req = createRequire(import.meta.url);
+        const pdfParseModule = req('pdf-parse');
+        const parseFn = typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule?.default;
+        if (typeof parseFn === 'function') {
+          const data = await parseFn(buffer);
+          if (data && data.text && data.text.trim()) {
+            return data.text;
+          }
         }
+      } catch {
+        // fallback to stream extraction below
       }
-    } catch (e) {
-      // fallback to stream extraction below
     }
     const raw = buffer.toString('utf8');
     const matches = raw.match(/\(([^)]+)\)\s*Tj/g);

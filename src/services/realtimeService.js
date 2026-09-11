@@ -82,9 +82,6 @@ export const realtimeService = {
     const payload = `event: ${eventType}\ndata: ${JSON.stringify({ ...data, timestamp: new Date().toISOString() })}\n\n`;
 
     const targets = [targetHotelId];
-    if (targetHotelId !== 'hotel-mercier' && !hotelClients.has(targetHotelId)) {
-      targets.push('hotel-mercier'); // Fallback for single tenant dev mode
-    }
 
     let dispatchedCount = 0;
     for (const id of targets) {

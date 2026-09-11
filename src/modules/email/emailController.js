@@ -85,6 +85,14 @@ export const googleOAuthCallbackController = async (req, res) => {
     const encryptedRefreshToken = tokens.refreshToken ? encryptToken(tokens.refreshToken) : null;
     const expiryDate = new Date(Date.now() + tokens.expiresIn * 1000);
 
+    // Automatic Re-linking: Clean up previous hotel binding for this email if it was linked elsewhere
+    await prisma.emailIntegration.deleteMany({
+      where: {
+        email: emailAddress,
+        hotelId: { not: hotelId },
+      },
+    }).catch(() => {});
+
     // 4. Update / Upsert EmailIntegration record scoped strictly to hotelId
     await prisma.emailIntegration.upsert({
       where: { hotelId },

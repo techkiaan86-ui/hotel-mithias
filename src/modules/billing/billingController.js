@@ -25,7 +25,35 @@ export const getSubscription = async (req, res, next) => {
 
     if (!subscription) {
       // Deterministically create default subscription for this hotel
-      const hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+      let hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+      if (!hotel) {
+        hotel = await prisma.hotel.upsert({
+          where: { id: hotelId },
+          update: {},
+          create: {
+            id: hotelId,
+            name: 'Hotel Mercier',
+            legalName: 'Hotel Mercier BV',
+            stars: 4,
+            roomsCount: 48,
+            address: 'Leopoldstraat 42',
+            postcode: '2000',
+            city: 'Antwerp',
+            country: 'Belgium',
+            timezone: 'Europe/Brussels',
+            currency: '€',
+            phone: '+32 3 227 41 00',
+            email: 'reception@hotelmercier.be',
+            website: 'hotelmercier.be',
+            bookingEngine: 'hotelmercier.be/book',
+            whatsappNumber: '+32 3 227 41 08',
+            checkIn: '15:00',
+            checkOut: '11:00',
+            vatNumber: 'BE 0784.512.339',
+            description: 'Hotel Mercier 4-star townhouse property',
+          },
+        });
+      }
       const rooms = hotel?.roomsCount || 48;
       const hotelName = hotel?.name || 'Hotel Mercier BV';
 

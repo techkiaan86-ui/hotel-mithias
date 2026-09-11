@@ -312,7 +312,7 @@ export async function processGuestMessageAI({
           text: `AI created task for Housekeeping: "${itemTitle}"`,
           meta: `Room ${room}`,
         },
-      }).catch(() => {});
+      }).catch(() => { });
 
       let aiReplyBody = await generateWithGemini({
         prompt: `A hotel guest (${guestName}, Room ${room}) sent this message: "${messageText}". Write a polite, warm, concise 2-sentence hotel reply letting them know we have dispatched housekeeping with their ${pattern.item.toLowerCase()} right away.`,
@@ -504,7 +504,7 @@ Write a polite, accurate, concise 1-3 sentence response directly answering their
           lastAt: timeStr,
         },
       });
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const aiMsg = await prisma.message.create({

@@ -763,3 +763,50 @@ export const handleEmbeddedSignupExchange = async (req, res, next) => {
   }
 };
 
+/**
+ * Endpoint: GET /api/whatsapp/oauth/callback (Direct Meta OAuth Callback Redirect)
+ */
+export const handleOAuthCallback = async (req, res) => {
+  const frontendOrigin = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',')[0].trim();
+  try {
+    const { code, state, error, error_description } = req.query;
+
+    if (error) {
+      console.warn('[Meta OAuth Callback Error]:', error, error_description);
+      return res.redirect(`${frontendOrigin}/onboarding?wa_error=${encodeURIComponent(error_description || error)}`);
+    }
+
+    if (!code) {
+      return res.redirect(`${frontendOrigin}/onboarding?wa_error=No+code+provided`);
+    }
+
+    let parsedState = {};
+    if (state) {
+      try {
+        const decodedStr = Buffer.from(state, 'base64').toString('utf-8');
+        parsedState = JSON.parse(decodedStr);
+      } catch (_) {
+        try {
+          parsedState = JSON.parse(state);
+        } catch (__) {}
+      }
+    }
+
+    const hotelId = parsedState.hotelId || 'hotel-mercier';
+    const targetType = parsedState.targetType || 'guest';
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/whatsapp/oauth/callback`;
+
+    await exchangeMetaCodeForToken({
+      code,
+      hotelId,
+      targetType,
+      redirectUri,
+    });
+
+    return res.redirect(`${frontendOrigin}/onboarding?wa_connected=true&targetType=${targetType}`);
+  } catch (err) {
+    console.error('[Meta OAuth Callback Exception]:', err.message);
+    return res.redirect(`${frontendOrigin}/onboarding?wa_error=${encodeURIComponent(err.message)}`);
+  }
+};
+

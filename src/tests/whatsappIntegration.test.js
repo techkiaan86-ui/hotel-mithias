@@ -36,6 +36,7 @@ describe('Guest WhatsApp Integration & Multi-Tenant Test Suite (Step 4)', () => 
     await prisma.conversation.deleteMany({ where: { guest: { hotelId: { in: [hotelIdA, hotelIdB] } } } }).catch(() => {});
     await prisma.guest.deleteMany({ where: { hotelId: { in: [hotelIdA, hotelIdB] } } }).catch(() => {});
     await prisma.whatsAppIntegration.deleteMany({ where: { hotelId: { in: [hotelIdA, hotelIdB] } } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { hotelId: { in: [hotelIdA, hotelIdB] } } }).catch(() => {});
     await prisma.hotel.deleteMany({ where: { id: { in: [hotelIdA, hotelIdB] } } }).catch(() => {});
 
     // Seed Hotel A and Hotel B with distinct WhatsApp numbers and Integrations

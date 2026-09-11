@@ -62,16 +62,22 @@ export const pmsService = {
    */
   async connectPms(hotelId, { provider = 'mews', propertyId }) {
     if (!hotelId) {
-      throw new Error('Hotel ID is required for PMS connection');
+      const err = new Error('Hotel ID is required for PMS connection');
+      err.statusCode = 400;
+      throw err;
     }
 
     const providerKey = (provider || 'mews').toLowerCase();
     if (providerKey !== 'mews') {
-      throw new Error(`PMS provider '${provider}' is not supported yet`);
+      const err = new Error(`PMS provider '${provider}' is not supported yet`);
+      err.statusCode = 400;
+      throw err;
     }
 
     if (!propertyId || typeof propertyId !== 'string' || propertyId.trim().length < 4) {
-      throw new Error('Property ID or Mews Access Token is required');
+      const err = new Error('Property ID or Mews Access Token is required');
+      err.statusCode = 400;
+      throw err;
     }
 
     const cleanPropertyId = propertyId.trim();

@@ -11,6 +11,7 @@ export async function exchangeMetaCodeForToken({
   displayPhoneNumber,
   hotelId,
   targetType = 'guest',
+  redirectUri,
 }) {
   if (!hotelId) {
     throw new Error('hotelId is required for Meta OAuth exchange');
@@ -24,9 +25,12 @@ export async function exchangeMetaCodeForToken({
   // 1. If real code and app secret provided, exchange code with Meta Graph API
   if (code && appId && appSecret) {
     try {
-      const url = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&code=${encodeURIComponent(
+      let url = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&code=${encodeURIComponent(
         code
       )}`;
+      if (redirectUri) {
+        url += `&redirect_uri=${encodeURIComponent(redirectUri)}`;
+      }
       const res = await fetch(url, { method: 'GET' });
       const data = await res.json();
 

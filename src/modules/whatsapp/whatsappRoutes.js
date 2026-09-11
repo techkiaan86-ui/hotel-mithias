@@ -6,6 +6,7 @@ import {
   handleWebhook,
   sendTestMessage,
   handleEmbeddedSignupExchange,
+  handleOAuthCallback,
 } from './whatsappController.js';
 
 const router = Router();
@@ -16,6 +17,7 @@ router.get('/webhook', verifyWebhook);
 router.post('/webhook', handleWebhook);
 router.post('/send', sendTestMessage);
 router.post('/embedded-signup', handleEmbeddedSignupExchange);
+router.get('/oauth/callback', handleOAuthCallback);
 
 export default router;
 

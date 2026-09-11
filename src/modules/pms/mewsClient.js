@@ -239,7 +239,11 @@ export class MewsClient {
 
     if (!verifiedBaseUrl) {
       const errMsg = lastAuthError?.message || 'Invalid Mews Access Token or unreachable Mews API';
-      throw new Error(`Mews authentication failed: ${errMsg}`);
+      const cleanErrMsg = errMsg.replace(/^Mews API Error:\s*/i, '').replace(/^Mews API returned HTTP \d+:\s*/i, '');
+      const err = new Error(`Mews authentication failed: ${cleanErrMsg}`);
+      err.statusCode = lastAuthError?.status === 429 ? 429 : 400;
+      err.code = 'PMS_AUTH_FAILED';
+      throw err;
     }
 
     // Cache verified live server for this token

@@ -188,7 +188,7 @@ export const emailService = {
       if (roomNum) {
         const resNumber = `RES-${roomNum}`;
         reservation = await prisma.reservation.upsert({
-          where: { number: resNumber },
+          where: { hotelId_number: { hotelId: targetHotelId, number: resNumber } },
           create: {
             number: resNumber,
             hotelId: targetHotelId,
@@ -210,7 +210,7 @@ export const emailService = {
       } else {
         const resNumber = `ENQ-${guest.id.slice(-4).toUpperCase()}`;
         reservation = await prisma.reservation.upsert({
-          where: { number: resNumber },
+          where: { hotelId_number: { hotelId: targetHotelId, number: resNumber } },
           create: {
             number: resNumber,
             hotelId: targetHotelId,

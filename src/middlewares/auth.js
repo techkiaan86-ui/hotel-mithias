@@ -4,12 +4,18 @@ import { errorResponse } from '../utils/response.js';
 
 export const authenticate = async (req, res, next) => {
   try {
+    let token = null;
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.query && req.query.token) {
+      token = req.query.token;
+    }
+
+    if (!token) {
       return errorResponse(res, 'Authentication token missing', 401);
     }
 
-    const token = authHeader.split(' ')[1];
     const decoded = verifyToken(token);
 
     if (!decoded || !decoded.id) {
